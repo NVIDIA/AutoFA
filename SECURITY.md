@@ -17,11 +17,11 @@ The [NVIDIA Product Security portal](https://nvidia.com/en-us/security/) provide
 security notices and the applicable disclosure policies. This project does not
 promise a separate response deadline or maintenance period.
 
-## Release status
+## Supported versions
 
-The open research distribution is being prepared for its first public release.
-There is no published security support matrix yet. Reports concerning the current
-development revision can use the channels above; include the exact commit.
+AutoFA is research software and does not publish a security support matrix.
+Security fixes are made on the main branch on a best-effort basis. When
+reporting, include the exact commit or version.
 
 ## AutoFA security boundaries
 
