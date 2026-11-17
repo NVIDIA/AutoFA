@@ -156,12 +156,14 @@ Results persist under `~/.autofa/`.
 
 ## Known limitations
 
-- AutoFA is a research preview and is not yet ready for production use. Code,
-  configuration and output formats may change between releases without backward
-  compatibility or a migration path.
-- Findings, taxonomies and detector scores are produced by AI agents and model judges.
-  They can be incomplete, mislabelled or wrong, so treat them as hypotheses to verify
-  against the underlying traces before acting on them.
+> [!IMPORTANT]
+> **Research preview**
+>
+> AutoFA is in research preview and is not yet ready for production use. Its code,
+> configuration and output formats may change without backward compatibility.
+> Findings are produced by AI agents and may be incomplete or inaccurate; review them
+> before acting on them.
+
 - Discovery and model-based judging need your own model access, and the selected trace
   content is sent to the providers you configure.
 - The Library server uses a shared profile: anyone holding its token can read and modify
