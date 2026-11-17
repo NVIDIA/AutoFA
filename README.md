@@ -24,12 +24,6 @@
   </picture>
 </p>
 
-> [!IMPORTANT]
-> **Research preview.** AutoFA is in research preview and is not yet ready for production
-> use. Its code, configuration and output formats may change without backward
-> compatibility. Findings are produced by AI agents and may be incomplete or inaccurate;
-> review them before acting on them. See [Known limitations](#known-limitations).
-
 A reward tells you *that* an agent failed, not *why*. AutoFA is a toolkit for
 reading completed evaluation runs (local **NeMo Gym** and **Harbor** folders or remote
 **EvalRDL** runs) and explaining their failures from complementary angles: bottom-up
