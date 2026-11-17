@@ -1,0 +1,23 @@
+version: 2
+workflow: classification
+
+source:
+  local_folder: uncompressed/glm
+
+selection:
+  per_run: 1362
+  sample: first
+  seed: 0
+  cache: outputs/glm/evidence
+
+taxonomy:
+  runs:
+    - first_pass: agentic
+      second_pass: agentic
+      judges:
+        - name: gpt-6.1-sol-agentic-updated
+          harness: codex
+          workers: 4
+          output: outputs/glm/classifications.jsonl
+      report:
+        output: outputs/glm/report.html

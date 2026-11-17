@@ -1,0 +1,336 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autofa"
+version = "0.1.0"
+description = "AutoFA — automated failure discovery from eval parquet logs"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "CC-BY-4.0 AND Apache-2.0"
+license-files = [
+  "LICENSE",
+  "NOTICE",
+  "CONTRIBUTING.md",
+  "THIRD_PARTY_NOTICES.md",
+  "third_party/evalrdl/README.md",
+  "third_party/dependency-notices.json",
+  "third_party/NATIVE_BINARY_REVIEW.md",
+  "third_party/licenses/**/*",
+]
+authors = [{ name = "AutoFA" }]
+dependencies = [
+  "numpy>=1.26",
+  "pyarrow>=15",
+  "polars>=2.0,<3",
+  "PyYAML>=6",
+  "rich>=13.7",
+  "pygments>=2.17",
+  "prompt-toolkit>=3.0",
+  "claude-agent-sdk>=0.2.160",
+  "openai>=1.45",
+  "regex",
+  "keyring>=25.7.0",
+  "tomlkit>=0.13",
+  "ijson>=3.4",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "jinja2>=3.1",
+  "python-multipart>=0.0.12",
+  "Pillow>=10",
+  "pypdfium2>=4.30,<6",
+  "av>=14",
+]
+
+[project.optional-dependencies]
+# The quality gates pin their linters: a new release can add findings without a code change.
+dev = [
+  "pytest>=8",
+  "pytest-xdist>=3.5",
+  "pytest-cov>=7.1",
+  "coverage>=7.9",
+  "ruff==0.17.4",
+  "pyright==1.1.414",
+  "httpx>=0.27",
+  "pre-commit>=4.0",
+  # Pinned: new releases change detection plugins and the .secrets.baseline format.
+  "detect-secrets==1.5.0",
+]
+audio = ["faster-whisper>=1.1,<2"]
+
+[project.scripts]
+autofa = "autofa.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+autofa = ["py.typed", "defaults.toml", "estimate_baselines.json", "taxonomy/versions/*.json", "skills/*/*.md", "preflight/*/*.md"]
+autofa_library_server = ["templates/*.html", "static/*.js", "static/*.css"]
+evalrdl_trace = ["static/*"]
+evalrdl_readers = ["core/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.coverage.run]
+source = ["src"]
+# sys.monitoring keeps the line-coverage overhead of the parallel suite small on Python 3.12.
+core = "sysmon"
+# The vendored evalrdl packages are tested in the EvalRDL repository, which exports them here.
+omit = ["src/evalrdl_*/*"]
+
+[tool.coverage.report]
+precision = 1
+skip_covered = true
+# Ratchet: statement coverage of src when the gate was added (CI and local runs). Raise it
+# when coverage rises; never lower it.
+fail_under = 87.9
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["third_party/licenses"]
+
+[tool.ruff.lint]
+# C901 and RUF100 are ratchets: see "Quality gates" in CONTRIBUTING.md.
+select = ["E", "F", "I", "UP", "B", "C90", "RUF100"]
+# Rules that are not enabled but whose `# noqa` comments document intent. Listing them keeps
+# RUF100 from reporting those comments as unused.
+external = ["A003", "ANN", "BLE001", "N802", "SLF001"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 25
+
+[tool.ruff.lint.per-file-ignores]
+# Ratchet: files with lines over 100 characters today, mostly embedded HTML/JS templates and the
+# bundled evalrdl snapshot. Do not add files. Remove an entry once its file is clean;
+# tests/test_quality_gates.py fails while an entry suppresses nothing.
+"src/autofa/data/evalrdl_efficiency.py" = ["E501"]
+"src/autofa/preflight/cheating/report.py" = ["E501"]
+"src/autofa/reports/efficiency_card.py" = ["E501"]
+"src/autofa/reports/failure_cards.py" = ["E501"]
+"src/evalrdl_export/autofa.py" = ["E501"]
+"src/evalrdl_readers/convert.py" = ["E501"]
+"src/evalrdl_readers/core/attach.py" = ["E501"]
+"src/evalrdl_readers/core/input.py" = ["E402", "E501"]
+"src/evalrdl_readers/core/reader.py" = ["E501"]
+"src/evalrdl_readers/readers/bundle_converter/__init__.py" = ["E501"]
+"src/evalrdl_readers/readers/bundle_converter/declare.py" = ["E501"]
+"src/evalrdl_readers/readers/bundle_converter/landmarks.py" = ["E501"]
+"src/evalrdl_readers/readers/codex/declare.py" = ["E501"]
+"src/evalrdl_readers/readers/common.py" = ["E501"]
+"src/evalrdl_readers/readers/dialects/pi.py" = ["E501"]
+"src/evalrdl_readers/readers/gym/agents/trial_agent.py" = ["E501"]
+"src/evalrdl_readers/readers/gym/declare.py" = ["E501"]
+"src/evalrdl_readers/readers/gym/gdpval.py" = ["E501"]
+"src/evalrdl_readers/readers/gym/ignores.py" = ["E501"]
+"src/evalrdl_readers/readers/gym/record.py" = ["E501"]
+"src/evalrdl_readers/readers/gym/trajectory.py" = ["E501"]
+"src/evalrdl_readers/readers/harbor/__init__.py" = ["E501"]
+"src/evalrdl_readers/readers/harbor/declare.py" = ["E501"]
+"src/evalrdl_readers/readers/harbor/decoders.py" = ["E501"]
+"src/evalrdl_readers/readers/harbor/records.py" = ["E501"]
+"src/evalrdl_readers/readers/harbor/translate.py" = ["E501"]
+"src/evalrdl_readers/readers/mounts.py" = ["E501"]
+"src/evalrdl_readers/readers/nemo_evaluator/declare.py" = ["E501"]
+"src/evalrdl_readers/readers/nemo_evaluator_launcher/declare.py" = ["E501"]
+"src/evalrdl_readers/readers/nemo_evaluator_launcher/traffic.py" = ["E501"]
+"src/evalrdl_readers/readers/nemo_skills/declare.py" = ["E501"]
+"src/evalrdl_readers/readers/nemo_skills/translate.py" = ["E501"]
+"src/evalrdl_readers/readers/pi/declare.py" = ["E501"]
+"src/evalrdl_readers/readers/store_schema.py" = ["E501"]
+"src/evalrdl_schema/backends.py" = ["E501"]
+"src/evalrdl_schema/v11/__init__.py" = ["E501"]
+"src/evalrdl_schema/v12/__init__.py" = ["E501"]
+"src/evalrdl_trace/conformance.py" = ["E501"]
+"tests/vendor/test_evalrdl_trace_prompts.py" = ["E501"]
+"tests/vendor/test_evalrdl_trace_trace.py" = ["E501"]
+
+[tool.ruff.lint.isort]
+# Shared test fixtures and helpers live in tests/support and are imported as `support.*`.
+known-local-folder = ["support"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.12"
+# Fixed so a macOS checkout and Linux CI report the same errors.
+pythonPlatform = "Linux"
+typeCheckingMode = "basic"
+# Ratchet: files with type errors when the check was added. New files are checked. Do not add
+# files; remove an entry once its file passes (tools/check_types.py fails while it does).
+ignore = [
+  "src/autofa/cli.py",
+  "src/autofa/config.py",
+  "src/autofa/core/localisation.py",
+  "src/autofa/core/sandbox.py",
+  "src/autofa/data/artifact_access.py",
+  "src/autofa/data/artifact_content.py",
+  "src/autofa/data/artifact_delivery.py",
+  "src/autofa/data/artifact_speech_access.py",
+  "src/autofa/data/artifact_store.py",
+  "src/autofa/data/bulk_trace.py",
+  "src/autofa/data/cohort.py",
+  "src/autofa/data/dataset_identity.py",
+  "src/autofa/data/discovery_delivery.py",
+  "src/autofa/data/execution_policy.py",
+  "src/autofa/data/local_import.py",
+  "src/autofa/data/local_trace_store.py",
+  "src/autofa/data/parquet_store.py",
+  "src/autofa/data/reference_data.py",
+  "src/autofa/data/remote_api.py",
+  "src/autofa/data/remote_library_api.py",
+  "src/autofa/data/remote_library_publish.py",
+  "src/autofa/data/row_index.py",
+  "src/autofa/data/source_inputs.py",
+  "src/autofa/data/source_model_calls.py",
+  "src/autofa/data/source_normalization.py",
+  "src/autofa/data/source_trajectory.py",
+  "src/autofa/data/trace_navigation.py",
+  "src/autofa/data/trajectory.py",
+  "src/autofa/harness/claude.py",
+  "src/autofa/harness/codex.py",
+  "src/autofa/harness/codex_app_server.py",
+  "src/autofa/harness/model_catalog.py",
+  "src/autofa/harness/usage.py",
+  "src/autofa/llm/hub.py",
+  "src/autofa/llm/responses.py",
+  "src/autofa/llm/windowing.py",
+  "src/autofa/mcp/runtime.py",
+  "src/autofa/mcp/server.py",
+  "src/autofa/mcp/tools_artifacts.py",
+  "src/autofa/mcp/tools_classifier.py",
+  "src/autofa/mcp/tools_contributions.py",
+  "src/autofa/mcp/tools_data.py",
+  "src/autofa/mcp/tools_eval.py",
+  "src/autofa/mcp/tools_helpers.py",
+  "src/autofa/mcp/tools_library.py",
+  "src/autofa/mcp/tools_repair.py",
+  "src/autofa/mcp/tools_repair_versions.py",
+  "src/autofa/metrics/claim_calibration.py",
+  "src/autofa/metrics/claim_compiler.py",
+  "src/autofa/metrics/claude_judge.py",
+  "src/autofa/metrics/discovery_grades.py",
+  "src/autofa/metrics/final_review.py",
+  "src/autofa/metrics/improvements.py",
+  "src/autofa/metrics/judge_budget.py",
+  "src/autofa/metrics/judge_evidence.py",
+  "src/autofa/metrics/judge_prefilter.py",
+  "src/autofa/metrics/library_coverage.py",
+  "src/autofa/metrics/progress.py",
+  "src/autofa/metrics/repair_tradeoff.py",
+  "src/autofa/metrics/repair_validation.py",
+  "src/autofa/metrics/review_content.py",
+  "src/autofa/metrics/review_diagnosis.py",
+  "src/autofa/metrics/review_scores.py",
+  "src/autofa/metrics/search_association.py",
+  "src/autofa/metrics/search_panel.py",
+  "src/autofa/metrics/search_ranking.py",
+  "src/autofa/metrics/task_support.py",
+  "src/autofa/metrics/verdicts.py",
+  "src/autofa/metrics/version_comparison.py",
+  "src/autofa/metrics/version_lessons.py",
+  "src/autofa/preflight/cheating/cli.py",
+  "src/autofa/preflight/cheating/detector.py",
+  "src/autofa/preflight/cheating/pipeline.py",
+  "src/autofa/reports/efficiency_card.py",
+  "src/autofa/reports/failure_cards.py",
+  "src/autofa/reports/ordering.py",
+  "src/autofa/session/admission.py",
+  "src/autofa/session/campaign_policy.py",
+  "src/autofa/session/classifier_recovery.py",
+  "src/autofa/session/contributions.py",
+  "src/autofa/session/detector_service.py",
+  "src/autofa/session/discovery_recovery.py",
+  "src/autofa/session/discovery_target.py",
+  "src/autofa/session/evidence_prerequisites.py",
+  "src/autofa/session/family_coverage.py",
+  "src/autofa/session/family_discovery.py",
+  "src/autofa/session/llm_readiness.py",
+  "src/autofa/session/polishing.py",
+  "src/autofa/session/polishing_evaluation.py",
+  "src/autofa/session/polishing_feedback.py",
+  "src/autofa/session/polishing_progress.py",
+  "src/autofa/session/prompts.py",
+  "src/autofa/session/repair_workflow.py",
+  "src/autofa/session/report_highlights.py",
+  "src/autofa/session/review_evidence.py",
+  "src/autofa/session/round_stagnation.py",
+  "src/autofa/session/round_validation.py",
+  "src/autofa/session/runner.py",
+  "src/autofa/session/smoke_work.py",
+  "src/autofa/session/status_log.py",
+  "src/autofa/session/supervision.py",
+  "src/autofa/session/synthesis_decisions.py",
+  "src/autofa/session/task_coverage.py",
+  "src/autofa/session/usage.py",
+  "src/autofa/session/usage_estimates.py",
+  "src/autofa/session/validation_controls.py",
+  "src/autofa/taxonomy/agentic_review.py",
+  "src/autofa/taxonomy/assets.py",
+  "src/autofa/taxonomy/classifier.py",
+  "src/autofa/taxonomy/cli.py",
+  "src/autofa/taxonomy/manifest.py",
+  "src/autofa/taxonomy/outcome_evidence.py",
+  "src/autofa/taxonomy/pipeline.py",
+  "src/autofa/taxonomy/report.py",
+  "src/autofa/taxonomy/schema.py",
+  "src/autofa/taxonomy/trace_digest.py",
+  "src/autofa/trace.py",
+  "src/autofa/ui/activity.py",
+  "src/autofa/ui/explorer.py",
+  "src/autofa/ui/library_browser.py",
+  "src/autofa/ui/library_settings.py",
+  "src/autofa/ui/llm_settings.py",
+  "src/autofa/ui/menus.py",
+  "src/autofa/ui/rollout_table.py",
+  "src/autofa/ui/settings.py",
+  "src/autofa/ui/taxonomy_settings.py",
+  "src/autofa/wizard/dataset.py",
+  "src/autofa/wizard/depth.py",
+  "src/autofa_library_server/catalog.py",
+  "src/autofa_library_server/lazy_report.py",
+  "src/autofa_library_server/local.py",
+  "src/autofa_library_server/main.py",
+  "src/autofa_library_server/repository.py",
+  "src/autofa_library_server/trace_transfer.py",
+  "src/evalrdl_export/api.py",
+  "src/evalrdl_export/autofa.py",
+  "src/evalrdl_export/trace.py",
+  "src/evalrdl_readers/convert.py",
+  "src/evalrdl_readers/core/attach.py",
+  "src/evalrdl_readers/core/input.py",
+  "src/evalrdl_readers/core/merge.py",
+  "src/evalrdl_readers/core/mount.py",
+  "src/evalrdl_readers/core/patterns.py",
+  "src/evalrdl_readers/core/reader.py",
+  "src/evalrdl_readers/core/translate.py",
+  "src/evalrdl_readers/readers/bundle_converter/declare.py",
+  "src/evalrdl_readers/readers/codex/declare.py",
+  "src/evalrdl_readers/readers/common.py",
+  "src/evalrdl_readers/readers/dialects/pi.py",
+  "src/evalrdl_readers/readers/dialects/sessions.py",
+  "src/evalrdl_readers/readers/gym/agents/tau2.py",
+  "src/evalrdl_readers/readers/gym/agents/trial_agent.py",
+  "src/evalrdl_readers/readers/gym/gdpval.py",
+  "src/evalrdl_readers/readers/gym/record.py",
+  "src/evalrdl_readers/readers/gym/run_files.py",
+  "src/evalrdl_readers/readers/gym/trajectory.py",
+  "src/evalrdl_readers/readers/harbor/declare.py",
+  "src/evalrdl_readers/readers/harbor/openinference.py",
+  "src/evalrdl_readers/readers/harbor/records.py",
+  "src/evalrdl_readers/readers/mounts.py",
+  "src/evalrdl_readers/readers/nemo_evaluator/declare.py",
+  "src/evalrdl_readers/readers/nemo_evaluator_launcher/declare.py",
+  "src/evalrdl_readers/readers/nemo_evaluator_launcher/traffic.py",
+  "src/evalrdl_readers/readers/nemo_skills/declare.py",
+  "src/evalrdl_readers/readers/pi/declare.py",
+  "src/evalrdl_readers/readers/prompts.py",
+  "src/evalrdl_trace/routes.py",
+  "src/evalrdl_trace/source.py",
+]

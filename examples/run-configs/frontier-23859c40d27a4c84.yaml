@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+version: 2
+source:
+  evalrdl_url: https://eval.example.org/#/run/23859c40d27a4c84
+config:
+  harness: codex
+  model: gpt-6.1-sol
+  effort: high
+  analysis_focus: both
+  optimization: recall
+  min_failure_modes: 4
+  max_rounds: 3
+  top_x: 5
+  default_eval_limit: 5000
+execution:
+  publish: false
+  require_llm_detectors: false

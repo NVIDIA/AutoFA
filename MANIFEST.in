@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Deployment presets and private export tooling never belong in release archives.
+prune config
+prune export
+prune vendor
+exclude copy.bara.sky
+exclude autofa.toml
+exclude .env
+include tools/check_dco.py
+include tools/check_license_headers.py

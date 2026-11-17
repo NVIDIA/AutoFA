@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Install once with `uv run --python 3.12 --extra dev pre-commit install`.
+# CI runs every hook on every file; see "Pre-commit hooks" in CONTRIBUTING.md.
+# Local hooks run through uv, so Ruff and detect-secrets use the versions pinned in
+# pyproject.toml rather than a second copy of each pin here.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1000, --enforce-all]
+        exclude: ^eval_data/(?:.*\.tar\.zst|example_reports/(?:glm|inkling)\.html)$
+      - id: detect-private-key
+      # Fixtures and license texts keep their original bytes.
+      - id: end-of-file-fixer
+        exclude: &exact-bytes ^(eval_data/.*\.tar\.zst$|tests/fixtures/|third_party/licenses/)
+      - id: trailing-whitespace
+        exclude: *exact-bytes
+      - id: mixed-line-ending
+        exclude: *exact-bytes
+
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: uv run --python 3.12 --extra dev ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: layering
+        name: layering contracts
+        entry: uv run --python 3.12 --extra dev python tools/check_layering.py
+        language: system
+        files: ^(src/autofa/.*\.py|tools/layering_exceptions\.txt)$
+        pass_filenames: false
+      - id: license-headers
+        name: license headers
+        entry: uv run --python 3.12 --extra dev python tools/check_license_headers.py
+        language: system
+        pass_filenames: false
+      - id: secrets
+        name: secrets (detect-secrets baseline)
+        entry: uv run --python 3.12 --extra dev python tools/check_secrets.py
+        language: system
+        exclude: ^\.secrets\.baseline$

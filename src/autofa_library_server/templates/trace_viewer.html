@@ -1,0 +1,37 @@
+{# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 #}
+{% extends "base.html" %}
+{% block title %}{{ run.model or run.run_id }} · Local trace · AutoFA Local Library{% endblock %}
+{% block head_first %}
+  <link rel="stylesheet" href="/trace-static/style.css?v={{ trace_asset_version }}">
+{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="/static/trace_theme.css?v={{ trace_asset_version }}">
+  <script src="/trace-static/kit.js?v={{ trace_asset_version }}" defer></script>
+  <script src="/trace-static/graph.js?v={{ trace_asset_version }}" defer></script>
+  <script src="/trace-static/trace.js?v={{ trace_asset_version }}" defer></script>
+  <script src="/static/trace_host.js?v={{ trace_asset_version }}" defer></script>
+{% endblock %}
+{% block main_class %}trace-page{% endblock %}
+{% block body %}
+<section class="detail-head trace-head">
+  <div>
+    <a class="back" href="/">← All libraries</a>
+    <p class="eyebrow">Local trace</p>
+    <h1>{{ run.model or run.run_id }}</h1>
+    <div class="chips">
+      {% if run.benchmark %}<span>{{ run.benchmark }}</span>{% endif %}
+      {% if run.harness %}<span>{{ run.harness }}</span>{% endif %}
+      <span title="{{ run.run_id }}">run {{ run.run_id[:12] }}</span>
+    </div>
+  </div>
+  <div class="detail-actions">
+    <a class="secondary-button" href="#/">All rollouts</a>
+    <a class="secondary-button" id="full-trace-text" hidden target="_blank"
+      rel="noopener noreferrer">Full text of this event or part</a>
+  </div>
+</section>
+<div id="main" class="trace-root" data-trace-store="{{ store_id }}">
+  <div class="empty">Loading local trace…</div>
+</div>
+{% endblock %}

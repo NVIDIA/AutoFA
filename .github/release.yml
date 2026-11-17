@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# This configures GitHub's Generate release notes button; it does not publish releases.
+# Review merged pull requests and the source changes when preparing release notes.
+changelog:
+  categories:
+    - title: Changes
+      labels:
+        - "*"

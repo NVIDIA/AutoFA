@@ -1,0 +1,262 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# AutoFA project config - autofa.toml
+# Isolated profiles use $AUTOFA_HOME/config.toml; AUTOFA_CONFIG overrides the path.
+# Edit and restart autofa. Comments document the defaults.
+
+# First launch detects an authenticated harness, preferring Codex when both are ready,
+# and applies its model/reasoning profile below. Saved selections are preserved.
+harness = "codex"
+# Analyses for New/Continue. Efficiency metrics are opt-in. Keep at least one enabled.
+analysis_outputs = ["agent"]
+# Optional preflight checks run before analysis; all are off by default.
+preflight_detectors = []
+# Optional discovery guidance. Focus: model | harness | both.
+analysis_focus = "both"
+# All Markdown in skills_dir is active recursively. Empty = checkout skills/,
+# then ./skills for installed AutoFA, then ~/.autofa/skills.
+skills_dir = ""
+# Additional files outside the folder; exclusions are relative to skills_dir.
+skill_paths = []
+disabled_skill_paths = []
+# Harness reference packs (skills_dir/harness/<pack>/) load only for a matching
+# harness. Empty = the logs' source harness; set a pack id such as "codex" to override.
+analysis_harness = ""
+top_x = 5
+max_rounds = 5
+# Continue past the round target until this many supported Good failure detectors remain.
+# 0 disables the minimum. Supervisor stop/finalize requests still apply.
+min_failure_modes = 4
+# Discovery horizon. The default stops once the Good minimum is met and confirmed
+# detectors cover 80% of failed attempts, and never runs past round 5. Every third
+# round rescores the full dataset. {} restores round/minimum stopping alone. Add
+# timezone-aware deadlines, explicit spend shares and approved finite overtime as needed.
+campaign_policy = { mode = "finish_on_target", round_limit = 5, coverage_target = 0.8, coverage_unit = "failed_attempts", checkpoint_every_rounds = 3 }
+# Optional approved AutoFA execution token rates, snapshotted before the first call.
+# This accounting is separate from efficiency workflow model prices below.
+usage_pricing = {}
+# Require a successful detector API readiness probe before discovery. Set false to
+# allow discovery with a warning when no detector endpoint is reachable.
+require_llm_detectors = true
+# Ordinary discovery only: also wait for confirmed coverage to plateau and
+# pending evaluations/reviews to finish. Off stops at the round target once the
+# minimum Good count is met.
+discovery_wait_for_plateau = false
+# Ordinary discovery: failed probes prompt a pivot, never an early stop. Only
+# completed, validated recovery rounds after the planned budget consume patience.
+# Final dataset scoring and review still run. Off retains unlimited minimum-driven discovery.
+discovery_terminate_if_stalled = true
+# Starts at zero after planned rounds.
+discovery_stall_rounds = 3
+# USD per million tokens for efficiency cost. A model entry is the real rate.
+# Models without an entry use the stand-in rates input 0.15, cached 0.03,
+# output 0.50.
+# [efficiency_model_prices.model-id]
+# input = 1.0
+# cached = 0.1
+# output = 3.0
+efficiency_model_prices = {}
+
+# Sampling and display limits.
+sample_fail_default = 12
+sample_pass_default = 2
+max_sample_per_call = 40
+prefer_informative = true
+text_truncate_chars = 2500
+# Empty uses the profile library directory.
+library_root = ""
+model = "gpt-6-astra"
+# Codex uses effort levels advertised by its model; default delegates to the harness.
+# Claude-only thinking: default | adaptive | enabled | disabled (model support varies).
+thinking = "default"
+effort = "default"
+# Used only for enabled thinking on models that support a token budget.
+thinking_budget_tokens = 10000
+default_eval_limit = 5000
+max_eval_limit = 15000
+# 0 = auto from free RAM at launch (sweet spot); pin e.g. 512 to override
+eval_chunk_size = 0
+
+# LLM detectors cost one API call per item, so they are scored on a stratified
+# subsample balanced between failures and successes, stratified by benchmark.
+# Shortages are filled from the other outcome; weights recover population estimates.
+# Reported intervals reflect the sampled evidence, not the population count.
+# 0 = no subsampling (score every row; slow and expensive on large corpora).
+# Applies to capped / mid-loop eval only; mode=full runs a census. Saving does not evaluate.
+llm_eval_sample = 200
+llm_eval_min_per_stratum = 5
+# Bounded concurrency for LLM detector calls; 1 = serial.
+llm_eval_workers = 8
+# Explicit scoring ceiling and retained input queue; unrelated data readers stay bounded.
+llm_eval_max_workers = 128
+llm_eval_queue_mib = 64
+
+# Independent behavior-judge examples per batch (1-8); 1 = serial.
+# Separate from llm_eval_workers. Concurrent batches each have their own limit.
+judge_workers = 4
+
+# Behavior judging (claim compilation, coverage audit and both review stages).
+# behavioral: validate the stated claim; contextual: require supported failure relevance;
+# causal: require a concrete, unrecovered contribution to the task failure.
+# This choice also controls discovery guidance and is snapshotted for Resume.
+# Causal contribution is the default; users can select a less strict policy.
+behavior_strictness = "causal"
+# Thinking/effort accept the same controls as discovery above.
+# Separate from the discovery model and the improvement classifier judge_model below.
+behavior_judge_model = "gpt-6.1-sol"
+# auto follows the discovery harness; claude/codex selects an independent judge.
+behavior_judge_harness = "auto"
+behavior_judge_effort = "medium"
+behavior_judge_thinking = "default"  # Claude-only; Codex uses effort.
+behavior_judge_thinking_budget_tokens = 10000
+
+# `autofa preflight cheating` reviews flagged rollouts on the judge endpoint (judge_base_url, else
+# the hub) with this model.
+cheating_check_model = "openai/openai/gpt-6-luna"
+
+# Claude Code CLI path (empty = auto-detect). Or set ANTHROPIC_API_KEY in .env.
+# claude_cli = "/home/you/.local/bin/claude"
+claude_cli = ""
+codex_cli = ""  # Empty = installed codex on PATH (or AUTOFA_CODEX_CLI).
+
+# Ordered named fallback profiles; empty disables autonomous model escalation.
+# Each profile uses name + feature_model, with optional feature_api/base_url/
+# api_key_env/request_options overrides. Credentials remain environment references.
+# The default ladder escalates Luna to medium reasoning, then Sol at medium and high.
+# Omitted endpoint fields inherit the detector endpoint, which must serve both models.
+classifier_profiles = [
+    { name = "luna_medium", feature_model = "openai/openai/gpt-6-luna", feature_api = "responses", feature_request_options = { reasoning_effort = "medium" } },
+    { name = "sol_medium", feature_model = "azure/openai/gpt-6.1-sol", feature_api = "responses", feature_request_options = { reasoning_effort = "medium" } },
+    { name = "sol_high", feature_model = "azure/openai/gpt-6.1-sol", feature_api = "responses", feature_request_options = { reasoning_effort = "high" } },
+]
+# Per-run comparisons, including changed controls/source and interrupted work.
+# Each comparison permits at most 120 SDK dispatches across both profiles.
+classifier_comparison_limit = 3
+feature_model = "openai/openai/gpt-6-luna"
+judge_model = "openai/openai/gpt-6-luna"
+# Taxonomy classification workflow.
+taxonomy_first_pass = "llm"
+taxonomy_second_pass = "llm"
+# Per-pass bound: Claude model turns or Codex evidence-tool calls.
+taxonomy_agentic_max_turns = 32
+# auto prefers Decisions for fixed-label calls when this endpoint/model supports it.
+# Free text uses Responses, with Chat fallback for servers without Responses.
+# Explicit overrides: responses | decisions (required for labels) | chat_completions.
+# The preference applies to detector and improvement-classifier API calls.
+feature_api = "auto"
+# Blank preserves historical inheritance; run classifier escalation pins this separately.
+judge_api = ""
+# No detector endpoint is built in. Set feature_base_url, feature_api_key_env and
+# feature_model (Settings > LLM endpoints). hub_* is a shared default that a
+# deployment preset (AUTOFA_SITE_CONFIG) may provide; blank means none.
+hub_base_url = ""
+hub_api_key_env = ""
+# Optional OpenAI-compatible endpoint overrides (API root, including /v1 if needed).
+# Set the matching key environment variable explicitly when changing endpoints.
+# Use api_key_env = "none" for a server without authentication (not an empty string).
+# judge_* configures API classifiers (including taxonomy), not the behavior judge.
+feature_base_url = ""
+feature_api_key_env = ""
+judge_base_url = ""
+judge_api_key_env = ""
+# Optional generation parameters, e.g. { max_completion_tokens = 8192 }.
+# omit_parameters removes defaults, e.g. { omit_parameters = ["temperature"] }.
+# Request reasoning off for discovery detectors and improvement-classifier calls.
+# OpenRouter accepts the same reasoning_effort shorthand. Models/endpoints must
+# support none; unsupported controls are errors, never silently removed. Override
+# these tables for another provider's controls, or use {} for provider defaults.
+feature_request_options = { reasoning_effort = "none" }
+# Shared classifiers keep provider defaults unless explicitly configured.
+judge_request_options = {}
+# Discovery only; explicit judge_request_options override these defaults.
+improvement_request_options = { reasoning_effort = "none" }
+
+# Optional EvalRDL-compatible run catalog and AutoFA exports. Blank hides the menu item.
+data_api_base_url = ""
+data_api_name = "EvalRDL remote server"
+remote_full_traces = true  # false explicitly opts into the summary-only API export
+
+# Shared AutoFA library service. Credentials use env or `autofa login` (OS keychain).
+remote_library_base_url = ""
+remote_library_token_env = "AUTOFA_LIBRARY_TOKEN"
+# cloud publishes lightweight reports; server transfers full local traces to autofa serve.
+# For server mode set remote_library_token_env = "AUTOFA_LIBRARY_TOKEN".
+remote_library_mode = "cloud"
+
+# Local Library Server starts with AutoFA even when publishing to the shared service.
+# Empty uses a loopback remote_library_base_url, otherwise http://127.0.0.1:8765.
+local_library_base_url = ""
+
+# ---------------------------------------------------------------------------
+# Detector field policy (anti-cheat)
+# ---------------------------------------------------------------------------
+# Detectors must stay portable (eval logs AND later SFT/training data).
+# Default "content" = only input / CoT / trace / answer text.
+#   content  — prompt_text, response_text, chain_of_thought, reasoning_*, …
+#              NO judge_text, hb_scoring_details_json, tests_status, labels
+#   metadata — allow grader/judge/metadata fields (labels still banned)
+#   custom   — only the allowed_fields list below
+detector_fields = "content"
+allow_metadata = false
+# allowed_fields = ["prompt_text", "response_text", "chain_of_thought"]
+# extra_allowed_fields = ["scratchpad"]   # extend content mode
+# banned_fields = []                      # extra always-banned names
+allowed_fields = []
+extra_allowed_fields = []
+banned_fields = []
+
+# ---------------------------------------------------------------------------
+# Optimization objective (Pareto frontier)
+# ---------------------------------------------------------------------------
+# Axes to maximize. Always edit objective_axes and objective_weights together:
+# weights are positional, so reorder or remove the corresponding weights too.
+# For example, axes ["task_recall", "raw_ppv"] with weights [70, 30] is a 2D goal.
+# Use weights [] for equal weighting regardless of axis order.
+# Specificity remains explanatory information, not a standard optimization axis.
+# Task recall counts each source-identified failed task once. Legacy "recall"
+# remains attempt recall, including repeated rollouts, when explicitly selected.
+objective_axes = ["ppv_at_pi0", "task_recall", "behavior_purity"]
+# Recall defaults to task recall 50%, adherence 30%, normalized precision 20%.
+# Precision preset: [50, 20, 30]; Recall preset: [20, 50, 30].
+# The weighted geometric mean is the only supported ranking.
+objective_rank = "geometric_mean"
+# Empty remains the explicit Balanced option; saved objectives are not migrated.
+objective_weights = [20, 50, 30]
+
+# ---------------------------------------------------------------------------
+# Creative exploration (String Seed of Thought — arXiv:2510.21150)
+# ---------------------------------------------------------------------------
+# Encourages diverse failure-mode hypotheses using a seeded exploration string.
+# Set false to omit the SSoT prompt block; discovery sampling still varies by round.
+exploration_ssot = true
+# Fixed main seed generates a reproducible sequence of different discovery-round seeds.
+# "auto" chooses a different main seed per fresh run. LLM responses can still vary.
+exploration_seed = 42
+# false = open-ended discovery (default); true = soft mechanism-template priors.
+exploration_templates = false
+
+# ---------------------------------------------------------------------------
+# Discovery plateau stopping
+# Completed investigations without additional confirmed task coverage.
+discovery_plateau_patience = 6
+
+[harness_defaults.claude]
+model = "claude-opus-5-5"
+behavior_judge_model = "claude-sonnet-5-5"
+thinking = "default"
+effort = "default"
+thinking_budget_tokens = 10000
+behavior_judge_thinking = "adaptive"
+behavior_judge_effort = "medium"
+behavior_judge_thinking_budget_tokens = 10000
+
+[harness_defaults.codex]
+model = "gpt-6-astra"
+behavior_judge_model = "gpt-6.1-sol"
+thinking = "default"
+effort = "default"
+thinking_budget_tokens = 10000
+behavior_judge_thinking = "default"
+behavior_judge_effort = "medium"
+behavior_judge_thinking_budget_tokens = 10000

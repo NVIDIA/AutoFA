@@ -1,0 +1,36 @@
+{# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 #}
+{% macro source_label(identities, compact=false) -%}
+  {%- if identities -%}
+    {%- for identity in identities -%}
+      {%- if not loop.first %} | {% endif -%}
+      {%- for source in identity.sources -%}
+        {%- if not loop.first %} + {% endif -%}
+        {%- if source.kind == 'evalrdl' -%}
+          EvalRDL · {{ source.run_id }}{% if not compact %} ({{ source.origin }}){% endif %}
+        {%- elif source.kind == 'local' -%}
+          Local data · {{ source.sha256[:12] ~ '…' if compact else source.sha256 }}
+        {%- else -%}
+          Source data unavailable
+        {%- endif -%}
+      {%- else -%}
+        Source data unavailable
+      {%- endfor -%}
+    {%- endfor -%}
+  {%- else -%}
+    Source data unavailable
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro source_card(library) -%}
+<p class="data-identity" title="{{ source_label(library.data_identities) }}">
+  <span>Source data</span>
+  <strong>{{ source_label(library.data_identities, compact=true) }}</strong>
+</p>
+{% if library.is_merged %}
+<p class="data-group-note">Explicitly merged · {{ library.data_group_count }} data selections</p>
+{% endif %}
+{% if library.data_identity_status == 'legacy_mixed' %}
+<p class="data-group-note">Historical mixed sources · version history retained</p>
+{% endif %}
+{%- endmacro %}

@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Documentation issue
+description: Report missing, incorrect, or unclear AutoFA documentation.
+title: "[Docs]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read CONTRIBUTING.md at the repository root before submitting.
+        Do not include private links, credentials, or confidential examples.
+        Report suspected vulnerabilities through the private channels in SECURITY.md.
+  - type: input
+    id: location
+    attributes:
+      label: Document or section
+      description: Provide a repository file path or a public documentation URL.
+      placeholder: README.md, Run section
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Documentation problem
+      description: Explain what is missing, incorrect, or difficult to follow.
+    validations:
+      required: true
+  - type: textarea
+    id: correction
+    attributes:
+      label: Suggested correction
+      description: Describe the change or example that would help, if known.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this documentation problem.
+          required: true
+        - label: This report contains only information I am authorized to share.
+          required: true

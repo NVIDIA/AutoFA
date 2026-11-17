@@ -1,0 +1,462 @@
+{
+  "source": {
+    "title": "Model or Harness? An Interaction-Centric Taxonomy for Localizing Agent Failures",
+    "authors": [
+      "Harsh Raj",
+      "Vipul Gupta",
+      "Anas Mahmoud",
+      "Razvan-Gabriel Dumitru",
+      "Darvin Yi",
+      "Aakash Sabharwal",
+      "Yunzhong He"
+    ],
+    "organization": "Scale AI",
+    "arxiv": "2607.28802",
+    "url": "https://arxiv.org/abs/2607.28802",
+    "license": "CC-BY-4.0",
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "basis": "Appendix B failure-mode definitions and Table 1 component vocabulary",
+    "adaptation": "Definitions retain the paper's mechanism and fault-side distinctions; interaction and component context is repeated at each selectable leaf because AutoFA currently selects directly over leaves."
+  },
+  "id": "autofa.interaction",
+  "name": "Interaction-centric agent failure taxonomy",
+  "version": "0",
+  "attribution_rule": "Start from the observed system-level failure, trace backward, and label the earliest failure from which execution does not recover. Later errors are downstream symptoms.",
+  "components": [
+    {
+      "id": "model",
+      "family": "model",
+      "definition": "The policy that processes observations and produces outputs or actions."
+    },
+    {
+      "id": "owner",
+      "family": "user",
+      "definition": "The human or upstream system that gives the agent its task and defines what counts as success."
+    },
+    {
+      "id": "grader",
+      "family": "user",
+      "definition": "The mechanism used to evaluate whether the agent completed the task successfully; it is usually not visible to the agent."
+    },
+    {
+      "id": "third_party",
+      "family": "user",
+      "definition": "An actor encountered during execution that does not act on behalf of the owner."
+    },
+    {
+      "id": "context",
+      "family": "harness",
+      "definition": "Information available to the model during the current interaction, including instructions, history, observations, and summaries."
+    },
+    {
+      "id": "memory",
+      "family": "harness",
+      "definition": "A persistent store that outlives the active context, within or across sessions."
+    },
+    {
+      "id": "tool",
+      "family": "harness",
+      "definition": "The bidirectional interface through which the model exchanges requests, actions, observations, and responses with other components."
+    },
+    {
+      "id": "peer_or_subagent",
+      "family": "harness",
+      "definition": "Another model acting either as a peer in the same workflow or as a subagent directed by the focal model."
+    },
+    {
+      "id": "local_environment",
+      "family": "environment",
+      "definition": "The immediate execution environment, such as the operating system, shell, filesystem, and runtimes."
+    },
+    {
+      "id": "external_environment",
+      "family": "environment",
+      "definition": "Systems outside the immediate execution environment, such as remote services, websites, APIs, databases, and model-provider infrastructure."
+    }
+  ],
+  "root": {
+    "id": "interaction_failure",
+    "label": "Interaction-localized agent failure",
+    "description": "A primary causal failure represented by the interaction edge where it originates, the endpoint at fault, and the failure mechanism. Outcome mismatches and evaluator scores are evidence, not causal leaves.",
+    "children": [
+      {
+        "id": "user_interactions",
+        "label": "User interactions",
+        "description": "Failures on interactions between the focal model and an owner, grader, or third party.",
+        "children": [
+          {
+            "id": "owner_model_edge",
+            "label": "Owner — model",
+            "description": "The owner supplies the task and success intent; the model interprets that task and acts.",
+            "children": [
+              {
+                "id": "owner_instruction_grader_mismatch",
+                "code": "OWN-IGM",
+                "label": "Owner — model · fault: owner · Instruction-Grader Mismatch",
+                "fault_side": "owner",
+                "description": "Interaction: owner — model. Fault side: owner. The stated instruction does not match the owner's true intent as captured by the grader or unstated expectations; the agent follows the instruction but is judged against a different requirement."
+              },
+              {
+                "id": "model_over_initiative",
+                "code": "OWN-OI",
+                "label": "Owner — model · fault: model · Over-initiative",
+                "fault_side": "model",
+                "description": "Interaction: owner — model. Fault side: model. The model acts beyond the requested scope, guesses intent, or takes a consequential action that required clarification or confirmation."
+              },
+              {
+                "id": "model_under_initiative",
+                "code": "OWN-UI",
+                "label": "Owner — model · fault: model · Under-initiative",
+                "fault_side": "model",
+                "description": "Interaction: owner — model. Fault side: model. The model halts, over-defers, or repeatedly demands confirmation on matters it could and should resolve, stalling supported progress."
+              },
+              {
+                "id": "model_satisficing",
+                "code": "OWN-SAT",
+                "label": "Owner — model · fault: model · Satisficing",
+                "fault_side": "model",
+                "description": "Interaction: owner — model. Fault side: model. The model cuts effort or scope, stops at a low internal bar, and declares completion while material work remains undone or stubbed."
+              },
+              {
+                "id": "model_instruction_following_failure",
+                "code": "OWN-IF",
+                "label": "Owner — model · fault: model · Instruction-Following Failure",
+                "fault_side": "model",
+                "description": "Interaction: owner — model. Fault side: model. The model ignores part of the specification, only partially completes the task, or violates an explicit constraint."
+              },
+              {
+                "id": "model_reasoning_failure",
+                "code": "OWN-RSN",
+                "label": "Owner — model · fault: model · Reasoning Failure",
+                "fault_side": "model",
+                "description": "Interaction: owner — model. Fault side: model. The model forms a flawed plan, makes a logical inference error, or pursues a nonsensical trajectory despite having the information required to reason correctly."
+              },
+              {
+                "id": "model_unauthorized_irreversible_action",
+                "code": "OWN-UIA",
+                "label": "Owner — model · fault: model · Unauthorized Irreversible Action",
+                "fault_side": "model",
+                "description": "Interaction: owner — model. Fault side: model. The agent performs a high-cost or irreversible action, such as deletion, external communication, or a transaction, without a required human confirmation gate."
+              },
+              {
+                "id": "model_sycophancy",
+                "code": "OWN-SYC",
+                "label": "Owner — model · fault: model · Sycophancy",
+                "fault_side": "model",
+                "description": "Interaction: owner — model. Fault side: model. The model prioritizes agreement with the owner's beliefs, preferences, or identity over objective truth and consistent reasoning."
+              },
+              {
+                "id": "model_domain_knowledge_deficit",
+                "code": "OWN-DKD",
+                "label": "Owner — model · fault: model · Domain Knowledge Deficit",
+                "fault_side": "model",
+                "description": "Interaction: owner — model. Fault side: model. The model lacks factual, scientific, or domain knowledge required to interpret and solve the task."
+              },
+              {
+                "id": "model_value_misalignment",
+                "code": "OWN-VM",
+                "label": "Owner — model · fault: model · Value Misalignment",
+                "fault_side": "model",
+                "description": "Interaction: owner — model. Fault side: model. The model's deliberation uses a flawed ethical framework, ignores key stakeholders, or violates expected duties even if its final action appears correct."
+              }
+            ]
+          },
+          {
+            "id": "grader_model_edge",
+            "label": "Model — grader",
+            "description": "The grader evaluates task success; the model may reason about or target that evaluation channel.",
+            "children": [
+              {
+                "id": "model_specification_gaming",
+                "code": "GRD-SG",
+                "label": "Model — grader · fault: model · Specification Gaming",
+                "fault_side": "model",
+                "description": "Interaction: model — grader. Fault side: model. The model exploits the reward, metric, or evaluation channel to score well without producing the behavior that score is intended to measure."
+              },
+              {
+                "id": "model_evaluation_awareness",
+                "code": "GRD-EA",
+                "label": "Model — grader · fault: model · Evaluation Awareness",
+                "fault_side": "model",
+                "description": "Interaction: model — grader. Fault side: model. The model recognizes that it is being evaluated and changes its behavior to satisfy or evade the grader rather than behaving as it would in deployment."
+              }
+            ]
+          },
+          {
+            "id": "third_party_model_edge",
+            "label": "Model — third party",
+            "description": "A third party is an actor encountered during execution that does not act on behalf of the owner.",
+            "children": [
+              {
+                "id": "model_indirect_prompt_injection",
+                "code": "3P-IPI",
+                "label": "Model — third party · fault: model · Indirect Prompt Injection",
+                "fault_side": "model",
+                "description": "Interaction: model — third party. Fault side: model. The model mistakes instructions embedded in third-party data for owner-authorized commands and allows that content to hijack control flow."
+              },
+              {
+                "id": "model_contextual_sycophancy",
+                "code": "3P-CS",
+                "label": "Model — third party · fault: model · Contextual Sycophancy",
+                "fault_side": "model",
+                "description": "Interaction: model — third party. Fault side: model. The model adopts a third party's beliefs, tone, or bias instead of maintaining independent judgment and the owner's stance."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "harness_interactions",
+        "label": "Harness interactions",
+        "description": "Failures involving context management, persistent memory, tools, peers, or subagents.",
+        "children": [
+          {
+            "id": "context_model_edge",
+            "label": "Context — model",
+            "description": "Context is the active information available to the model, including instructions, observations, history, and summaries.",
+            "children": [
+              {
+                "id": "model_state_tracking_failure",
+                "code": "CTX-ST",
+                "label": "Context — model · fault: model · State Tracking Failure",
+                "fault_side": "model",
+                "description": "Interaction: context — model. Fault side: model. Relevant state remains available, but the model fails to recognize progress or completion and repeats actions or subtasks without advancing."
+              },
+              {
+                "id": "model_goal_drift",
+                "code": "CTX-GD",
+                "label": "Context — model · fault: model · Goal Drift",
+                "fault_side": "model",
+                "description": "Interaction: context — model. Fault side: model. As the trajectory grows, recent context displaces the original goal or constraints even though the necessary information remains present."
+              },
+              {
+                "id": "context_rationale_erosion",
+                "code": "CTX-RE",
+                "label": "Context — model · fault: context · Context Rationale Erosion",
+                "fault_side": "context",
+                "description": "Interaction: context — model. Fault side: context. Harness-driven compaction or summarization preserves a surface instruction but drops a reason or constraint needed later, leading the model to reverse a previously correct decision."
+              }
+            ]
+          },
+          {
+            "id": "memory_model_edge",
+            "label": "Model — memory",
+            "description": "Memory is persistent information that outlives the active context within or across sessions.",
+            "children": [
+              {
+                "id": "model_memory_missed_write",
+                "code": "MEM-MW",
+                "label": "Model — memory · fault: model · Missed Write",
+                "fault_side": "model",
+                "description": "Interaction: model — memory. Fault side: model. The model fails to recognize and store a high-signal fact, rule, result, or constraint when it occurs."
+              },
+              {
+                "id": "model_memory_state_staleness",
+                "code": "MEM-SS",
+                "label": "Model — memory · fault: model · State Staleness",
+                "fault_side": "model",
+                "description": "Interaction: model — memory. Fault side: model. The model fails to update or replace stored information after the underlying state changes."
+              },
+              {
+                "id": "model_memory_overgeneralization",
+                "code": "MEM-OG",
+                "label": "Model — memory · fault: model · Overgeneralization",
+                "fault_side": "model",
+                "description": "Interaction: model — memory. Fault side: model. The model stores a specific temporary observation or workaround as a broad permanent rule."
+              },
+              {
+                "id": "model_memory_rationale_erosion",
+                "code": "MEM-RE",
+                "label": "Model — memory · fault: model · Memory Rationale Erosion",
+                "fault_side": "model",
+                "description": "Interaction: model — memory. Fault side: model. The model stores a surface instruction without the reason or constraint that justifies it and later reverses the intended decision."
+              },
+              {
+                "id": "model_memory_pollution",
+                "code": "MEM-POL",
+                "label": "Model — memory · fault: model · Pollution",
+                "fault_side": "model",
+                "description": "Interaction: model — memory. Fault side: model. The model writes incorrect, irrelevant, or transient scratch material into durable memory and degrades future use."
+              },
+              {
+                "id": "model_memory_redundancy",
+                "code": "MEM-RED",
+                "label": "Model — memory · fault: model · Redundancy",
+                "fault_side": "model",
+                "description": "Interaction: model — memory. Fault side: model. The model repeatedly stores duplicate or marginally different copies of the same information."
+              },
+              {
+                "id": "model_memory_missed_read",
+                "code": "MEM-MR",
+                "label": "Model — memory · fault: model · Missed Read",
+                "fault_side": "model",
+                "description": "Interaction: model — memory. Fault side: model. Relevant information is stored correctly, but the model does not consult memory before acting."
+              },
+              {
+                "id": "model_memory_following_failure",
+                "code": "MEM-MF",
+                "label": "Model — memory · fault: model · Memory Following Failure",
+                "fault_side": "model",
+                "description": "Interaction: model — memory. Fault side: model. The model retrieves relevant stored information but ignores or contradicts it when acting."
+              }
+            ]
+          },
+          {
+            "id": "tool_model_edge",
+            "label": "Model — tool",
+            "description": "A tool is the bidirectional interface relaying model requests/actions and returned observations/responses.",
+            "children": [
+              {
+                "id": "model_malformed_arguments",
+                "code": "TOOL-MA",
+                "label": "Model — tool · fault: model · Malformed Arguments",
+                "fault_side": "model",
+                "description": "Interaction: model — tool. Fault side: model. The model knows the intended action but expresses it with arguments that violate the tool's required syntax or schema."
+              },
+              {
+                "id": "model_suboptimal_arguments",
+                "code": "TOOL-SA",
+                "label": "Model — tool · fault: model · Suboptimal Arguments",
+                "fault_side": "model",
+                "description": "Interaction: model — tool. Fault side: model. The model supplies structurally valid but low-signal, vague, inefficient, or otherwise poorly chosen arguments."
+              },
+              {
+                "id": "model_incorrect_tool_selection",
+                "code": "TOOL-ITS",
+                "label": "Model — tool · fault: model · Incorrect Tool Selection",
+                "fault_side": "model",
+                "description": "Interaction: model — tool. Fault side: model. The model chooses an available tool that is wrong for the task or fundamentally inefficient when a suitable tool exists."
+              },
+              {
+                "id": "model_tool_hallucination",
+                "code": "TOOL-TH",
+                "label": "Model — tool · fault: model · Tool Hallucination",
+                "fault_side": "model",
+                "description": "Interaction: model — tool. Fault side: model. The model attempts to call an API, command, or tool that is absent from the provided tool schema."
+              },
+              {
+                "id": "model_tool_feedback_neglect",
+                "code": "TOOL-FN",
+                "label": "Model — tool · fault: model · Tool Feedback Neglect",
+                "fault_side": "model",
+                "description": "Interaction: model — tool. Fault side: model. The tool explicitly reports information or failure, but the model overlooks it and continues with an incompatible plan or false success claim."
+              },
+              {
+                "id": "model_tool_recovery_failure",
+                "code": "TOOL-RF",
+                "label": "Model — tool · fault: model · Tool Recovery Failure",
+                "fault_side": "model",
+                "description": "Interaction: model — tool. Fault side: model. A tool anomaly is recoverable, but the model loops, blindly trusts bad data, gives up, or fails to choose an alternative route."
+              },
+              {
+                "id": "tool_mistranslation",
+                "code": "TOOL-MT",
+                "label": "Model — tool · fault: tool · Mistranslation",
+                "fault_side": "tool",
+                "description": "Interaction: model — tool. Fault side: tool. The integration layer, wrapper, or marshaling code garbles an otherwise correct observation or mis-maps an otherwise correct model action."
+              }
+            ]
+          },
+          {
+            "id": "peer_model_edge",
+            "label": "Model — model (peer)",
+            "description": "A peer is another model in the same workflow that is not directed by the focal model.",
+            "children": [
+              {
+                "id": "peer_delegation_failure",
+                "code": "PEER-DEL",
+                "label": "Model — model (peer) · fault: model · Delegation Failure",
+                "fault_side": "model",
+                "description": "Interaction: model — peer model. Fault side: model. Peers divide work without accounting for dependencies or workspace boundaries, producing incomplete, overlapping, or incompatible results."
+              },
+              {
+                "id": "peer_communication_failure",
+                "code": "PEER-COM",
+                "label": "Model — model (peer) · fault: model · Communication Failure",
+                "fault_side": "model",
+                "description": "Interaction: model — peer model. Fault side: model. A peer withholds needed information, fails to share it, or fails to use information supplied by another peer."
+              }
+            ]
+          },
+          {
+            "id": "subagent_model_edge",
+            "label": "Model — model (subagent)",
+            "description": "A subagent is another model assigned and directed by the focal model, which acts as orchestrator.",
+            "children": [
+              {
+                "id": "subagent_delegation_failure",
+                "code": "SUB-DEL",
+                "label": "Model — model (subagent) · fault: focal model · Delegation Failure",
+                "fault_side": "focal_model",
+                "description": "Interaction: focal model — subagent. Fault side: focal model. The orchestrator delegates work with incorrect scope, dependencies, ordering, or workspace boundaries."
+              },
+              {
+                "id": "subagent_communication_failure",
+                "code": "SUB-COM",
+                "label": "Model — model (subagent) · fault: focal model or subagent · Communication Failure",
+                "fault_side": "focal_model_or_subagent",
+                "description": "Interaction: focal model — subagent. Fault side: whichever model fails. The orchestrator omits or fails to route needed context or use results, or the subagent fails to report relevant results and constraints."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "environment_interactions",
+        "label": "Environment interactions",
+        "description": "Failures involving the immediate local execution environment or external services.",
+        "children": [
+          {
+            "id": "external_environment_model_edge",
+            "label": "External environment — model",
+            "description": "External services include remote sites, APIs, databases, cloud platforms, and model-provider infrastructure.",
+            "children": [
+              {
+                "id": "external_service_failure",
+                "code": "EXT-SF",
+                "label": "External environment — model · fault: environment · Service Failure",
+                "fault_side": "external_environment",
+                "description": "Interaction: external environment — model. Fault side: external environment. A remote service hits an internal error, timeout, rate limit, or unavailable condition and cannot complete the request, with no viable recovery route."
+              },
+              {
+                "id": "external_stale_state_delivery",
+                "code": "EXT-SSD",
+                "label": "External environment — model · fault: environment · Stale State Delivery",
+                "fault_side": "external_environment",
+                "description": "Interaction: external environment — model. Fault side: external environment. A service reports healthy status while silently returning stale or cached state, with no signal that it is outdated."
+              },
+              {
+                "id": "model_external_recovery_failure",
+                "code": "EXT-RF",
+                "label": "External environment — model · fault: model · Recovery Failure",
+                "fault_side": "model",
+                "description": "Interaction: external environment — model. Fault side: model. An external problem is recoverable, but the model fails to retry, diagnose, route around it, or ask for help."
+              }
+            ]
+          },
+          {
+            "id": "local_environment_model_edge",
+            "label": "Local environment — model",
+            "description": "The local environment includes the operating system, shell, filesystem, runtimes, and directly observable execution state.",
+            "children": [
+              {
+                "id": "model_observation_failure",
+                "code": "LOC-OF",
+                "label": "Local environment — model · fault: model · Observation Failure",
+                "fault_side": "model",
+                "description": "Interaction: local environment — model. Fault side: model. A cue needed to act correctly is present in the model's observation space, but the model overlooks it or acts without resolving the ambiguity."
+              },
+              {
+                "id": "model_local_recovery_failure",
+                "code": "LOC-RF",
+                "label": "Local environment — model · fault: model · Recovery Failure",
+                "fault_side": "model",
+                "description": "Interaction: local environment — model. Fault side: model. A local condition such as a missing file or broken state is fixable, but the model gives up, assumes incorrectly, or fails to repair it."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

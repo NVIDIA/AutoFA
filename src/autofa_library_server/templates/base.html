@@ -1,0 +1,39 @@
+<!doctype html>
+{# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 #}
+<html lang="en" data-theme="{{ ui_theme(request) }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AutoFA Local Library{% endblock %}</title>
+  <script src="/static/theme.js?v=1"></script>
+  {% block head_first %}{% endblock %}
+  <link rel="stylesheet" href="/static/style.css?v=16">
+  <script src="/static/app.js?v=15" defer></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  {% block header %}
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark"></span>AutoFA Local Library</a>
+    <div class="topbar-actions">
+    <button type="button" class="secondary-button theme-toggle" data-theme-toggle>{{ "Light" if ui_theme(request) == "dark" else "Dark" }}</button>
+    {% block topbar_actions %}{% endblock %}
+    {% if me %}
+    <nav class="identity" aria-label="Account">
+      {% if me.avatar_url %}
+        <img src="{{ me.avatar_url }}" alt="" class="avatar">
+      {% endif %}
+      <span><strong>{{ me.name }}</strong><small>@{{ me.username }}</small></span>
+      <span class="local-badge">On this machine</span>
+      <a href="/api/docs">API docs</a>
+    </nav>
+    {% endif %}
+    </div>
+  </header>
+  {% endblock %}
+  <main class="{% block main_class %}{% endblock %}">
+    {% block body %}{% endblock %}
+  </main>
+</body>
+</html>
