@@ -1,0 +1,40 @@
+{
+  "schema_version": 2,
+  "samples": [
+    {
+      "signature": {
+        "harness": "claude",
+        "model": "claude-opus-5-5"
+      },
+      "workload": {
+        "rows": 3000,
+        "mean_chars": 357302.1041666667,
+        "mean_steps": 36.270833333333336,
+        "sampled_rows": 48
+      },
+      "round_seconds": {
+        "0": 3480.0,
+        "1": 2543.0
+      },
+      "top_x": 5
+    },
+    {
+      "signature": {
+        "harness": "claude",
+        "model": "claude-opus-5-5"
+      },
+      "workload": {
+        "rows": 2400,
+        "mean_chars": 298522.8333333333,
+        "mean_steps": 183.79166666666666,
+        "sampled_rows": 48
+      },
+      "round_seconds": {
+        "0": 7465.0,
+        "1": 6108.0,
+        "2": 3666.0
+      },
+      "top_x": 5
+    }
+  ]
+}

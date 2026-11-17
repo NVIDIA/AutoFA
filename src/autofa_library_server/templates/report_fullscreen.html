@@ -1,0 +1,18 @@
+<!doctype html>
+{# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 #}
+<html lang="en" data-theme="{{ ui_theme(request) }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoFA · Failure report</title>
+  <script src="/static/app.js?v=15" defer></script>
+  <style>html,body{margin:0;height:100%;overflow:hidden}iframe{border:0;width:100%;height:100%}</style>
+</head>
+<body>
+  <iframe class="report-frame" src="{{ report_url }}" data-failure-bridge
+    data-selected-failure="{{ selected_failure or '' }}"
+    data-data-api-base="{{ data_api_base_url }}" data-local-traces="true"
+    sandbox="allow-scripts" referrerpolicy="no-referrer" title="Failure-card report"></iframe>
+</body>
+</html>

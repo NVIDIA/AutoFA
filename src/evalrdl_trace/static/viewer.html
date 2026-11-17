@@ -1,0 +1,89 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>trace</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/kit.js"></script>
+<script src="/static/graph.js"></script>
+<script src="/static/trace.js"></script>
+</head>
+<body>
+<main id="main"><div class="empty">loading…</div></main>
+<script>
+// The host trace.js runs in when it is served on its own: one run, its rollouts, and a rollout's
+// trace. What a fuller host adds (exports, a file viewer, run annotations) is absent here.
+const main = document.getElementById("main");
+
+function table(cols, rows, onclick) {
+  const t = document.createElement("table");
+  t.innerHTML = "<thead><tr>" + cols.map(c => `<th>${esc(c)}</th>`).join("") + "</tr></thead>";
+  const tb = document.createElement("tbody");
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = cols.map(c => `<td>${row.__html?.[c] ?? esc(fmt(row[c]))}</td>`).join("");
+    if (onclick) { tr.className = "link"; tr.onclick = () => onclick(row); }
+    tb.appendChild(tr);
+  }
+  t.appendChild(tb);
+  return t;
+}
+
+function fillExports(root) {}
+const fileHashFor = () => "#/";
+const artHashFor = () => null;
+
+function runMetaStrip(run) {
+  const kv = (k, v) => (v == null || v === "") ? "" :
+    `<span class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(fmt(v))}</span></span>`;
+  const d = document.createElement("div"); d.className = "runmeta";
+  d.innerHTML = [
+    kv("benchmark", run.benchmark), kv("harness", run.harness), kv("model", run.model),
+    kv("rollouts", run.n_rollouts), kv("mean events", run.mean_events),
+    kv("mean tool calls", run.mean_tool_calls), kv("artifacts", run.n_artifacts),
+    kv("source", run.source_path), kv("run", run.run_id),
+  ].join("");
+  return d;
+}
+
+async function viewRollouts() {
+  const [run] = await api("/v1/runs");
+  const rows = await api(`/v1/runs/${encodeURIComponent(run.run_id)}/rollouts`);
+  main.replaceChildren($(`<h2>${esc(run.benchmark || run.run_id)}</h2>`), runMetaStrip(run),
+    table(["task_id", "repeat", "status", "reward", "n_events", "n_tool_calls"], rows, (r) => {
+      location.hash = `#/rollout/${encodeURIComponent(run.run_id)}/${encTask(r.task_id)}/${r.repeat}`;
+    }));
+}
+
+async function route() {
+  try {
+    const full = location.hash.replace(/^#\/?/, "");
+    const qi = full.indexOf("?");
+    const h = qi < 0 ? full : full.slice(0, qi);
+    const hq = new URLSearchParams(qi < 0 ? "" : full.slice(qi + 1));
+    const seg = h.split("/").map(decodeURIComponent);
+    if (seg[0] === "rollout" && seg.length >= 4) {
+      const key = `#/rollout/${encodeURIComponent(seg[1])}/${encodeURIComponent(seg[2])}/${seg[3]}`;
+      const m = (seg[4] || "").match(/^e(\d+)(?:-p(\d+))?(~pretty)?$/);
+      if (key === curRollout && m) {
+        if (m[3] || hq.get("pretty") === "1") setPretty(true);
+        if (hq.has("mode") && curTraceSetMode) curTraceSetMode(hq.get("mode"));
+        if (curTraceSetLanes) curTraceSetLanes(hq);
+        return jumpToEvent(+m[1], m[2] != null ? +m[2] : null, hq.get("lane") || "");
+      }
+      return await viewRollout(seg[1], seg[2], seg[3], hq);
+    }
+    curRollout = null;
+    return await viewRollouts();
+  } catch (e) {
+    main.replaceChildren($(`<div class="empty">${esc(String((e && e.message) || e))}</div>`));
+  }
+}
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>

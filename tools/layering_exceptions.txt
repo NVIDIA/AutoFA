@@ -1,0 +1,33 @@
+# Ratchet for tools/check_layering.py: imports from autofa.core, autofa.data and autofa.metrics
+# into autofa.mcp, autofa.ui, autofa.cli or autofa.session that existed when the check was added.
+# Each line is "importer -> imported module". Do not add lines. When you remove the last such
+# import, delete its line: the check fails while a line matches no import.
+autofa.core.library -> autofa.session.contributions
+autofa.core.library -> autofa.session.review_evidence
+autofa.data.cohort -> autofa.ui.menus
+autofa.data.corpus_health -> autofa.session.exploration
+autofa.data.discovery_delivery -> autofa.mcp.runtime
+autofa.data.discovery_delivery -> autofa.session.recovery
+autofa.data.remote_library_publish -> autofa.mcp.runtime
+autofa.data.remote_library_publish -> autofa.ui.errors
+autofa.data.source_inputs -> autofa.session.managed_launch
+autofa.metrics.claude_judge -> autofa.mcp.runtime
+autofa.metrics.diagnostic_review -> autofa.mcp.tools_eval
+autofa.metrics.diagnostic_review -> autofa.session.family_coverage
+autofa.metrics.diagnostic_review -> autofa.session.review_evidence
+autofa.metrics.diagnostic_review -> autofa.session.smoke_work
+autofa.metrics.final_review -> autofa.mcp.runtime
+autofa.metrics.final_review -> autofa.mcp.tools_eval
+autofa.metrics.final_review -> autofa.session.family_coverage
+autofa.metrics.final_review -> autofa.session.guidance
+autofa.metrics.final_review -> autofa.session.operation_admission
+autofa.metrics.final_review -> autofa.session.recovery
+autofa.metrics.final_review -> autofa.session.review_evidence
+autofa.metrics.final_validation_selection -> autofa.mcp.tools_eval
+autofa.metrics.judge_checkpoints -> autofa.session.recovery
+autofa.metrics.judge_checkpoints -> autofa.session.status_log
+autofa.metrics.library_quality_coverage -> autofa.session.family_coverage
+autofa.metrics.progress -> autofa.ui.theme
+autofa.metrics.version_comparison -> autofa.session.repair_workflow
+autofa.metrics.version_lessons -> autofa.session.repair_versions
+autofa.metrics.version_lessons -> autofa.session.repair_workflow

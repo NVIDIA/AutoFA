@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Bug report
+description: Report an AutoFA problem with a minimal reproduction.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read CONTRIBUTING.md at the repository root before submitting.
+        Report suspected vulnerabilities privately through
+        [NVIDIA Product Security](https://nvidia.com/en-us/security/report-vulnerability/),
+        following SECURITY.md. Use synthetic examples and remove credentials,
+        private data, internal URLs, and confidential model outputs.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Actual and expected behavior
+      description: Explain what happened and what you expected AutoFA to do.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the command, relevant configuration, and smallest synthetic example needed to reproduce the problem.
+      placeholder: |
+        1. Prepare synthetic input with these fields...
+        2. Run this AutoFA command...
+        3. Observe this result...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include relevant versions. Describe the model provider or local endpoint type without keys, tokens, or private addresses.
+      placeholder: |
+        - AutoFA version or commit:
+        - Operating system:
+        - Python version:
+        - Model/provider, if relevant:
+        - Browser, if this affects the local dashboard:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized error output
+      description: Include only relevant errors or stack traces. Do not attach your profile directory, tokens, or private input/output files.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: This report contains no credentials or confidential data and does not disclose a suspected security vulnerability.
+          required: true

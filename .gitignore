@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+# Anchor to repo root so package dirs like src/autofa/data/ are not ignored.
+/dist/
+/build/
+.coverage
+# Temporary config left only if tools/check_types.py is interrupted.
+/.pyright-ratchet-*.json
+/htmlcov/
+/.tmp/
+.env
+# Per-checkout user settings; may include local paths or private extensions.
+/autofa.toml
+# Deployment preset loaded beside the source; it may name internal endpoints.
+/config/internal.toml
+/data/
+/eval_data/outputs/
+/eval_data/uncompressed/
+/sandbox/
+uv.lock
+
+.cursor/plans/
+/meetup-presentation/
+
+# Keep local release planning out of the source repository.
+/docs/release-preparation.md

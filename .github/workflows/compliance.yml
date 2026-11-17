@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release compliance
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  licenses:
+    name: License headers and metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check source notices and packaged legal files
+        run: python3 tools/check_license_headers.py
+
+  dco:
+    name: External contributor DCO
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check contribution sign-offs
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          metadata="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" \
+            --jq '[.author_association, .commits, .user.login, .user.type,
+                   (.head.repo.full_name // "")] | @tsv')"
+          IFS=$'\t' read -r association expected_count author author_type head_repo <<< "$metadata"
+          echo "GitHub author association: $association"
+          dco_args=(--expected-count "$expected_count")
+          # Dependabot signs off as support@github.com, not as its commit author, so its
+          # commits cannot pass the author check. Only Dependabot can open a pull request
+          # as dependabot[bot]; with its branch in this repository, only maintainers can add
+          # commits, and theirs still need a sign-off.
+          if [[ "$author" == "dependabot[bot]" && "$author_type" == "Bot" \
+                && "$head_repo" == "$GITHUB_REPOSITORY" ]]; then
+            dco_args+=(--exempt-bot "dependabot[bot]")
+          fi
+          case "$association" in
+            MEMBER|OWNER)
+              echo "NVIDIA contributions remain subject to internal IP and maintainer review."
+              ;;
+            *)
+              gh api --paginate --slurp \
+                "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/commits?per_page=100" \
+                | python3 tools/check_dco.py "${dco_args[@]}"
+              ;;
+          esac
+      - name: NVIDIA contribution review
+        if: github.event_name != 'pull_request'
+        run: echo "NVIDIA contributions remain subject to internal IP and maintainer review."

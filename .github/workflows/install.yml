@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The test job runs from the source checkout with the dev extra. This workflow installs the
+# built wheel alone, so it catches modules or data the wheel leaves out, imports of
+# dev-only packages, and breakage on newer Python releases that requires-python allows.
+name: Install
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wheel:
+    name: Wheel install (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    env:
+      NO_COLOR: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Pull-request code runs later; keep the token out of its Git config.
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Build the wheel
+        run: uv build --python ${{ matrix.python }} --wheel --out-dir "$RUNNER_TEMP/dist"
+
+      - name: Install the wheel without extras
+        shell: bash
+        run: |
+          uv venv --python ${{ matrix.python }} "$RUNNER_TEMP/wheel-env"
+          uv pip install --python "$RUNNER_TEMP/wheel-env/bin/python" "$RUNNER_TEMP"/dist/*.whl
+
+      - name: Check modules, package data, imports and the CLI
+        run: '"$RUNNER_TEMP/wheel-env/bin/python" -I tools/check_wheel_install.py'

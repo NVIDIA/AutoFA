@@ -1,0 +1,90 @@
+/* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 */
+
+/* AutoFA's look for the bundled trace viewer: its theming properties (evalrdl-trace README,
+   "Theming") from AutoFA's tokens, light and dark, and the viewer's page-level rules kept off
+   AutoFA's chrome. Loaded after the viewer's style.css and AutoFA's style.css, so AutoFA's :root
+   tokens (--bg, --panel, --line, --muted, --subtle, --accent-*) are the ones the viewer reads. */
+
+body { font-size: 16px; }
+.topbar a { font-size: inherit; }
+
+main.trace-page { max-width: none; padding: 24px 32px 64px; }
+.trace-head { margin-bottom: 22px; align-items: flex-end; }
+.trace-head h1 { font-size: clamp(26px, 3vw, 36px); overflow-wrap: anywhere; }
+.trace-head .back { margin-bottom: 14px; }
+.trace-head .detail-actions a { text-decoration: none; }
+
+.trace-root {
+  --fg: var(--ink);
+  --accent: var(--accent-dark);
+  --line-strong: var(--control-line);
+  --ink-soft: var(--muted);
+  --font: var(--sans);
+  --font-size: 14px;
+  /* The sticky top bar is 58px tall plus its border. */
+  --sticky-top: 59px;
+  color: var(--fg);
+  font: 14px/1.45 var(--sans);
+}
+:root[data-theme="dark"] .trace-root {
+  --on-accent: #10120e;
+  --grid: #262626;
+  --ok: #5cc97a;
+  --bad: #ff7b6e;
+  --reason-bg: #241c31;
+  --reason-edge: #a67ae0;
+  --reason-soft: #2b2140;
+  --reason-line: #4d3a6b;
+  --reason-ink: #cdb4f2;
+  --tool-bg: #29231a;
+  --warn-soft: #2b2414;
+  --warn-line: #5a4a24;
+  --warn-ink: #e8c77a;
+  --ok-soft: #17291c;
+  --ok-ink: #8fd6a3;
+  --bad-soft: #2f1b1a;
+  --bad-line: #6e3b37;
+  --bad-ink: #ff9d94;
+  --teal-soft: #132a27;
+  --teal-line: #285a53;
+  --teal-ink: #7fd8c9;
+  --mark: #8a6a00;
+}
+.trace-root a { color: var(--accent-dark); }
+.trace-root h2 {
+  margin: 26px 0 10px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+/* AutoFA sizes every input and select for its forms; the viewer's are inline controls. */
+.trace-root input, .trace-root select {
+  width: auto;
+  min-height: 0;
+  padding: 0;
+  border-radius: 3px;
+}
+.trace-root select { padding: 2px 6px; border: 1px solid var(--control-line); }
+.trace-root input:focus, .trace-root select:focus { outline: 2px solid var(--focus); }
+
+/* Panels and controls in AutoFA's proportions. */
+.trace-root .event, .trace-root table, .trace-root .trace-side { border-radius: 10px; }
+.trace-root table { overflow: hidden; }
+.trace-root th {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.trace-root .segmented { border-color: var(--control-line); border-radius: 6px; }
+.trace-root .segmented button { font-weight: 600; }
+.trace-root .pbtn, .trace-root .lbtn, .trace-root .tree-btn, .trace-root .moretoggle {
+  border-radius: 6px;
+}
+.trace-root .crumb a { color: var(--accent-dark); }

@@ -1,0 +1,127 @@
+{# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 #}
+{% extends "base.html" %}
+{% from "data_identity.html" import source_label, source_card %}
+{% block title %}Libraries · AutoFA Local Library{% endblock %}
+{% block body %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">Shared function catalog</p>
+    <h1>AutoFA libraries</h1>
+    <p>One card per source dataset, with detector libraries and analysis history stored on this machine.</p>
+  </div>
+  <div class="run-count"><strong id="visible-count">{{ libraries|length }}</strong> libraries</div>
+</section>
+
+{% if catalog_indexing or pending_reports %}
+<p id="catalog-progress" role="status">Saved libraries and report details are
+  loading in the background. Available libraries can be opened now. This page updates automatically.</p>
+{% endif %}
+
+<section class="filters" aria-label="Library filters">
+  <label>
+    <span>Search</span>
+    <input id="search-filter" type="search" placeholder="Source data ID, model, benchmark, owner, or analysis">
+  </label>
+  <label>
+    <span>Model</span>
+    <select id="model-filter">
+      <option value="">All models</option>
+      {% for model in libraries|map(attribute="model_id")|unique|sort %}
+        <option value="{{ model }}">{{ model }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    <span>Benchmark</span>
+    <select id="benchmark-filter">
+      <option value="">All benchmarks</option>
+      {% set seen = namespace(values=[]) %}
+      {% for library in libraries %}
+        {% for benchmark in library.benchmarks %}
+          {% if benchmark not in seen.values %}
+            {% set seen.values = seen.values + [benchmark] %}
+            <option value="{{ benchmark }}">{{ benchmark }}</option>
+          {% endif %}
+        {% endfor %}
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    <span>Owner</span>
+    <select id="owner-filter">
+      <option value="">All owners</option>
+      <option value="{{ me.username }}" selected>@{{ me.username }}</option>
+      {% for owner in libraries|map(attribute="owner_username")|unique|sort %}
+        {% if owner != me.username %}
+          <option value="{{ owner }}">@{{ owner }}</option>
+        {% endif %}
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    <span>Source harness</span>
+    <select id="harness-filter">
+      <option value="">All harnesses</option>
+      {% for harness in libraries|map(attribute="source_harness")|unique|sort %}
+        <option value="{{ harness }}">{{ harness }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    <span>From</span>
+    <input id="date-from-filter" type="date">
+  </label>
+  <label>
+    <span>To</span>
+    <input id="date-to-filter" type="date">
+  </label>
+</section>
+
+<section id="run-grid" class="run-grid">
+  {% for library in libraries %}
+  <article
+    class="run-card"
+    data-search="{{ library.model_id }} {{ library.benchmarks|join(' ') }} {{ library.source_run_id }} {{ library.owner_username }} {{ library.owner_name }} {{ library.source_harness }} {{ source_label(library.data_identities) }}"
+    data-model="{{ library.model_id }}"
+    data-benchmarks="{{ library.benchmarks|join('|') }}"
+    data-owner="{{ library.owner_username }}"
+    data-harness="{{ library.source_harness }}"
+    data-date="{{ library.updated_at[:10] }}"
+  >
+    <a class="card-link" href="/libraries/{{ library.id }}" aria-label="Open {{ library.model_id }} library · {{ source_label(library.data_identities) }} · @{{ library.owner_username }}{% if not library.data_identities %} · card {{ library.id }}{% endif %}"></a>
+    <div class="card-head">
+      <span class="model" title="Model of latest analysis">{{ library.model_id }}</span>
+      <span class="revision" title="Stored on this machine">latest v{{ library.revision }}</span>
+    </div>
+    <div class="card-owner">
+      {% if library.owner_avatar %}
+        <img src="{{ library.owner_avatar }}" alt="" class="avatar">
+      {% endif %}
+      <span>{{ library.owner_name }} <small>@{{ library.owner_username }}</small></span>
+    </div>
+    {{ source_card(library) }}
+    <p class="run-id">Latest analysis · {{ library.source_run_id }}</p>
+    <div class="chips">
+      {% for benchmark in library.benchmarks %}
+        <span>{{ benchmark }}</span>
+      {% else %}
+        <span>all benchmarks</span>
+      {% endfor %}
+    </div>
+    <div class="card-facts">
+      <span><strong>{{ library.function_count }}</strong> functions</span>
+      <span><strong>{{ library.branch_count }}</strong> branches</span>
+      <span><strong>{{ library.version_count }}</strong> versions</span>
+      <span><strong>{{ library.source_harness }}</strong> source harness</span>
+    </div>
+    <p class="card-updated">Updated {{ library.updated_at|display_time }}</p>
+  </article>
+  {% endfor %}
+</section>
+
+<section id="empty-state" class="empty-state" {% if libraries %}hidden{% endif %}>
+  <h2>{% if catalog_indexing %}Loading saved libraries{% else %}No libraries yet{% endif %}</h2>
+  <p>{% if catalog_indexing %}Libraries appear as they are indexed.{% else %}No libraries match these filters.{% endif %}</p>
+</section>
+{% endblock %}

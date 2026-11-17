@@ -1,0 +1,146 @@
+{# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0 #}
+{% extends "base.html" %}
+{% from "data_identity.html" import source_label, source_card %}
+{% block title %}{{ selected_version.model_id or library.model_id }} · AutoFA Local Library{% endblock %}
+{% block main_class %}report-main{% endblock %}
+{% block body %}
+{% set version_path = "/api/v2/libraries/" ~ library.id ~ "/branches/" ~ selected_branch.id ~ "/versions/" ~ selected_version.id %}
+<section class="detail-head">
+  <div>
+    <a class="back" href="/">← All libraries</a>
+    <p class="eyebrow">Versioned detector library</p>
+    <h1>{{ selected_version.model_id or library.model_id }}</h1>
+    {{ source_card(library) }}
+    <div class="detail-owner">
+      {% if library.owner_avatar %}
+        <img src="{{ library.owner_avatar }}" alt="" class="avatar">
+      {% endif %}
+      <span>{{ library.owner_name }} <small>@{{ library.owner_username }}</small></span>
+    </div>
+    <div class="chips">
+      {% for benchmark in selected_version.benchmarks|default(library.benchmarks) %}
+        <span>{{ benchmark }}</span>
+      {% else %}
+        <span>all benchmarks</span>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="detail-actions">
+    <button
+      class="share-button"
+      type="button"
+      data-copy-value="{{ canonical_url }}"
+    >Copy canonical link</button>
+    {% if is_owner %}
+      <form
+        class="delete-form"
+        action="/libraries/{{ library.id }}/delete"
+        method="post"
+        data-confirm="This will permanently delete every branch, version, and failure-card in this library. Continue?"
+      >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="danger-button" type="submit">Delete library</button>
+      </form>
+    {% endif %}
+  </div>
+</section>
+
+<section class="history-panel" aria-label="Library history">
+  <div class="history-selectors">
+    <form id="branch-selector-form" action="/libraries/{{ library.id }}" method="get">
+      <label for="branch-select">Branch</label>
+      <select id="branch-select" name="branch_id" data-auto-submit>
+        {% for branch in branches %}
+          <option
+            value="{{ branch.id }}"
+            {% if branch.id == selected_branch.id %}selected{% endif %}
+          >{{ branch.branch_key }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <form id="version-selector-form" action="/libraries/{{ library.id }}" method="get">
+      <input type="hidden" name="branch_id" value="{{ selected_branch.id }}">
+      <label for="version-select">Version</label>
+      <select id="version-select" name="version_id" data-auto-submit>
+        {% for version in versions %}
+          <option
+            value="{{ version.id }}"
+            {% if version.id == selected_version.id %}selected{% endif %}
+          >v{{ version.version_number }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+  <p class="history-summary">
+    {{ library.branch_count }} branch{% if library.branch_count != 1 %}es{% endif %}
+    · {{ library.version_count }} version{% if library.version_count != 1 %}s{% endif %}
+    · {{ selected_version.function_count }} function{% if selected_version.function_count != 1 %}s{% endif %}
+    · published {{ selected_version.created_at|display_time }}
+    · source harness: {{ selected_version.source_harness }}
+    · {{ selected_version.publish_trigger|replace('_', ' ') }}
+  </p>
+</section>
+
+{% if is_owner %}
+<section class="merge-card-section" aria-label="Merge data cards">
+  <details class="merge-card">
+    <summary>Merge with another data card</summary>
+    <p>Combine cards you own. All branches, versions,
+      and report history stay available. Future analyses of either dataset join the merged card.</p>
+    {% if merge_candidates %}
+    <form
+      action="/libraries/{{ library.id }}/merge"
+      method="post"
+      data-confirm="Merge this card into the selected card? All branches, versions, and report history will be retained. If either card is private, the merged card stays private."
+    >
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="merge-target">Merge into</label>
+      <select id="merge-target" name="target_library_id" required>
+        <option value="" selected disabled>Select another data card</option>
+        {% for candidate in merge_candidates %}
+        <option value="{{ candidate.id }}">
+          {{ source_label(candidate.data_identities, compact=true) }}
+          · {{ candidate.model_id }} · {{ candidate.benchmarks|join(", ") or "all benchmarks" }}
+          · {{ candidate.branch_count }} branches · {{ candidate.version_count }} versions
+        </option>
+        {% endfor %}
+      </select>
+      <p>If either card is private, the merged card stays private.</p>
+      <button class="secondary-button" type="submit">Merge into selected card</button>
+    </form>
+    {% else %}
+    <p>No other data cards are available to merge.</p>
+    {% endif %}
+  </details>
+</section>
+{% endif %}
+
+<section class="report-section">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Failure analysis</p>
+      <h2>Failure cards</h2>
+    </div>
+    <div class="report-actions">
+      <a
+        href="/libraries/{{ library.id }}/report?{{ report_query }}&amp;standalone=1"
+        target="_blank"
+        rel="noopener"
+      >Open full screen</a>
+      <a href="{{ version_path }}/library.json">Download library.json</a>
+    </div>
+  </div>
+  <iframe
+    class="report-frame"
+    src="/libraries/{{ library.id }}/report?{{ report_query }}&amp;theme={{ ui_theme(request) }}"
+    data-failure-bridge
+    data-local-traces="true"
+    data-selected-failure="{{ selected_failure or '' }}"
+    data-data-api-base="{{ data_api_base_url }}"
+    sandbox="allow-scripts"
+    referrerpolicy="no-referrer"
+    title="Failure-card report"
+  ></iframe>
+</section>
+{% endblock %}

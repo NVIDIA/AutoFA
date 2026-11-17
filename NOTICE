@@ -1,0 +1,15 @@
+AutoFA
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+The top-level LICENSE contains CC-BY-4.0 and Apache-2.0 terms. Code-only
+files carry Apache-2.0 source notices. Documentation, prompts/skills and
+assets follow the top-level dual-license terms.
+
+This distribution includes NVIDIA-authored EvalRDL schema, reader, export
+and trace components. Their origin and integration are described in
+third_party/evalrdl/README.md.
+
+Third-party dependencies and their copyright, license and attribution
+notices are listed in THIRD_PARTY_NOTICES.md. The corresponding license
+texts are retained under third_party/licenses/. Third-party terms are
+not replaced by AutoFA's license.

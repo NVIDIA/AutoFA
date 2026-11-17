@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# CodeRabbit review settings: https://docs.coderabbit.ai/reference/configuration
+# The review rules restate CONTRIBUTING.md; keep the two in step.
+language: en-US
+tone_instructions: >-
+  Be concise and direct. Report correctness, safety, compatibility and test gaps. Skip
+  style points: Ruff and the CI quality gates already enforce them.
+
+reviews:
+  poem: false
+  high_level_summary: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!third_party/licenses/**"
+    - "!third_party/dependency-notices.json"
+    - "!.secrets.baseline"
+  path_instructions:
+    - path: "src/**/*.py"
+      instructions: >-
+        Flag changes that alter saved-run, library, report or publication formats, rewrite
+        user data, or change the meaning of an existing metric without a described and
+        tested migration. Detectors and judges must use evidence available to the model,
+        with no hidden dependence on labels, graders or evaluation outcomes. Reusable
+        analysis, data access and persistence stay separate from CLI presentation; a new
+        line in tools/layering_exceptions.txt needs a stated reason. Failures should carry
+        enough context to act on, keep recoverable local state, and release files, locks,
+        clients and servers. Flag credentials, private data and internal URLs.
+        User-facing text (menu labels, CLI messages, reports) uses the terms in
+        docs/glossary.md and sentence case, and a new user-facing concept needs a glossary
+        entry. Prompt or rubric text that feeds a cache identity, such as
+        src/autofa/metrics/claude_judge.py, changes only with a cache migration.
+    - path: "**/*.md"
+      instructions: >-
+        Check user-facing terms against docs/glossary.md: flag terms its Avoid column lists,
+        such as "function" for a detector or "attempt" for a rollout outside metric names,
+        and flag a new user-facing concept that has no glossary entry. Menu and settings
+        labels are sentence case and match the labels in the source. Text in backticks is
+        exempt. Do not suggest rewording src/autofa/preflight/cheating/rubric.md: its text
+        feeds a cache identity.
+    - path: "src/autofa_library_server/**"
+      instructions: >-
+        The public dashboard must keep its loopback binding, authentication and request
+        validation (see SECURITY.md). Flag any change that weakens them.
+    - path: "src/evalrdl_*/**"
+      instructions: >-
+        Bundled evalrdl snapshot (third_party/evalrdl/README.md). Prefer small,
+        self-contained changes and flag edits that change reader or schema behavior
+        without a test.
+    - path: "tests/**/*.py"
+      instructions: >-
+        Tests use local fixtures and test doubles: no paid model calls, credentials or
+        private services. CLI and Library tests use a temporary AUTOFA_HOME. Tests run in
+        parallel under pytest-xdist, so they must not depend on execution order or on
+        state left by another test. Live tests stay behind their opt-in environment
+        variables. Prefer meaningful failure cases over tests that restate the
+        implementation. Test media use only the codecs that tools/build_ffmpeg.sh builds.
+    - path: ".github/workflows/**"
+      instructions: >-
+        Pin every action to a full commit SHA with a version comment, grant the least
+        workflow permissions, and keep secrets out of jobs that pull requests trigger.
+    - path: "pyproject.toml"
+      instructions: >-
+        Ratchet lists (Ruff per-file ignores, the Pyright ignore list, the coverage floor)
+        may only shrink; an added entry or a lower floor needs a reason in the pull
+        request. A new dependency needs its origin and license explained, and runtime
+        dependencies need THIRD_PARTY_NOTICES.md updated. Flag any dependency, tool or
+        fixture that installs or bundles FFmpeg, PyAV or audio/video codecs beyond those
+        tools/build_ffmpeg.sh builds, for example PyPI PyAV wheels or faster-whisper with
+        its default PyAV wheel. Pillow's AV1 and WebP image codecs are already reviewed.
+
+knowledge_base:
+  code_guidelines:
+    # AGENTS.md and CLAUDE.md in this repository bootstrap the AutoFA driver for end
+    # users; they are not review rules. CodeRabbit cannot exclude its default guideline
+    # files, so the feature stays off and the rules above restate CONTRIBUTING.md.
+    enabled: false

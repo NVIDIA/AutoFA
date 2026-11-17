@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+interface:
+  display_name: "AutoFA Driver"
+  short_description: "Run and supervise AutoFA analyses from a goal"
+  default_prompt: "Use $autofa-driver to choose and supervise the AutoFA workflow for my goal."
