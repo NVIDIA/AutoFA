@@ -154,6 +154,14 @@ Results persist under `~/.autofa/`.
 
 ## Known limitations
 
+> [!IMPORTANT]
+> **Research preview**
+>
+> AutoFA is in research preview and is not yet ready for production use. Its code,
+> configuration and output formats may change without backward compatibility.
+> Findings are produced by AI agents and may be incomplete or inaccurate; review them
+> before acting on them.
+
 - Discovery and model-based judging need your own model access, and the selected trace
   content is sent to the providers you configure.
 - The Library server uses a shared profile: anyone holding its token can read and modify
