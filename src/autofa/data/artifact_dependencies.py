@@ -15,7 +15,6 @@ import platform
 import shutil
 import signal
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -24,8 +23,12 @@ from pathlib import Path
 from autofa.util.cancellation import check_cancelled
 
 OFFICE_INSTALL_TIMEOUT = 600
+# Audio, video and speech need a PyAV that the user builds against their own FFmpeg.
+AUDIO_VIDEO_SETUP = (
+    "https://github.com/NVIDIA/AutoFA/blob/main/docs/artifact-dependencies.md"
+    "#audio-video-and-speech"
+)
 _OFFICE_INSTALL_LOCK = threading.Lock()
-_PYTHON_INSTALL_LOCK = threading.Lock()
 _OFFICE_ENV = "AUTOFA_LIBREOFFICE"
 
 
@@ -205,58 +208,30 @@ def install_office_support() -> dict:
         _OFFICE_INSTALL_LOCK.release()
 
 
-def _python_install_command(package: str) -> list[str] | None:
-    # Never alter a host Python or use pip's global/user installation fallback.
-    if sys.prefix == sys.base_prefix:
-        return None
-    if uv := shutil.which("uv"):
-        return [uv, "pip", "install", "--python", sys.executable, package]
-    if importlib.util.find_spec("pip"):
-        return [sys.executable, "-m", "pip", "install", package]
-    return None
+def _media_support(capability: str) -> dict:
+    """Report the PyAV (and faster-whisper) that the user installs; AutoFA never installs them.
 
-
-def _python_support(capability: str, *, install: bool) -> dict:
-    module, package = {
-        "audio": ("av", "av>=14"),
-        "speech": ("faster_whisper", "faster-whisper>=1.1,<2"),
-    }[capability]
-    available = importlib.util.find_spec(module) is not None
-    command = _python_install_command(package) if not available else None
-    result = {
-        "capability": capability,
-        "status": "available" if available else "unavailable",
-        "install_command": command,
+    PyAV's PyPI wheels bundle an FFmpeg with codecs AutoFA must not distribute, and
+    faster-whisper requires PyAV, so both come from the user's own source build.
+    """
+    packages = {"av": "PyAV"} if capability == "audio" else {
+        "av": "PyAV", "faster_whisper": "faster-whisper",
     }
-    if available or not install:
-        return result
-    if not command:
-        return dict(
-            result, reason="Activate AutoFA's virtual environment with uv or pip available."
+    missing = [name for module, name in packages.items()
+               if importlib.util.find_spec(module) is None]
+    result: dict = {"capability": capability,
+                    "status": "unavailable" if missing else "available"}
+    if missing:
+        result.update(
+            missing=missing,
+            reason=(
+                f"{' and '.join(missing)} {'is' if len(missing) == 1 else 'are'} not installed. "
+                "AutoFA does not install PyAV, FFmpeg or speech packages; build them as "
+                "described in the setup guide."
+            ),
+            setup=AUDIO_VIDEO_SETUP,
         )
-    while not _PYTHON_INSTALL_LOCK.acquire(timeout=0.25):
-        check_cancelled()
-    try:
-        check_cancelled()
-        # Another parallel artifact request may have just installed it.
-        importlib.invalidate_caches()
-        if importlib.util.find_spec(module):
-            return dict(result, status="available", installed=False, install_command=None)
-        try:
-            installation = _run_installer(command, timeout=OFFICE_INSTALL_TIMEOUT)
-        except OSError as exc:
-            installation = {"status": "unavailable", "reason": str(exc)}
-        importlib.invalidate_caches()
-        available = importlib.util.find_spec(module) is not None
-        return dict(
-            result,
-            status="available" if available else "unavailable",
-            installed=available,
-            install_command=None if available else command,
-            installation=installation,
-        )
-    finally:
-        _PYTHON_INSTALL_LOCK.release()
+    return result
 
 
 def prepare_artifact_support(
@@ -265,7 +240,11 @@ def prepare_artifact_support(
     install: bool = False,
     model: str = "base",
 ) -> dict:
-    """Inspect dependencies, or explicitly prepare a fixed supported capability."""
+    """Inspect dependencies, or explicitly prepare a fixed supported capability.
+
+    Office installs LibreOffice. Audio only reports the user-built PyAV; speech can
+    download a local model once the user has installed PyAV and faster-whisper.
+    """
     check_cancelled()
     if capability not in {"office", "audio", "speech"}:
         raise ValueError("capability must be 'office', 'audio', or 'speech'.")
@@ -275,7 +254,7 @@ def prepare_artifact_support(
         return install_office_support() if install else office_support_status()
     if capability == "speech" and model not in {"tiny", "base", "small"}:
         raise ValueError("model must be 'tiny', 'base', or 'small'.")
-    result = _python_support(capability, install=install)
+    result = _media_support(capability)
     if capability == "speech":
         from autofa.data.artifact_audio import prepare_speech_model, speech_model_identity
 
@@ -287,7 +266,12 @@ def prepare_artifact_support(
                 else speech_model_identity(model)
             )
         except (ImportError, OSError, RuntimeError, ValueError) as exc:
-            model_state = {"status": "unavailable", "name": model, "reason": str(exc)}
+            # Without the packages, repeating install=True cannot help; point to setup instead.
+            reason = str(exc) if result["status"] == "available" else (
+                "Install PyAV and faster-whisper first (see setup); this tool cannot install "
+                "them. It can download the model once they are installed."
+            )
+            model_state = {"status": "unavailable", "name": model, "reason": reason}
         result["model"] = model_state
         if model_state.get("status") != "available":
             result["status"] = "unavailable"
@@ -295,7 +279,8 @@ def prepare_artifact_support(
             "Speech transcripts are machine-generated evidence and can be wrong. "
             "Music, sound effects and speaker identity are not assessed."
         ]
-    if result["status"] != "available":
+    # Only LibreOffice and a speech model can be prepared here; packages are the user's.
+    if result["status"] != "available" and "setup" not in result:
         result["next_action"] = {
             "tool": "prepare_artifact_support",
             "arguments": {

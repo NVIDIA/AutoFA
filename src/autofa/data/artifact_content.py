@@ -582,9 +582,11 @@ def inspect_artifact(
             )
     except ImportError as exc:
         result.update(status="unavailable", complete=False, visual_complete=False)
+        # Audio/video readers explain their own setup; AutoFA does not install PyAV.
         result["limitations"].append(
-            "PDF/image/video inspection needs Pillow, pypdfium2 and PyAV, which AutoFA "
-            "installs; reinstall AutoFA. " + str(exc)
+            str(exc) if result.get("format") in {"audio", "video"} else
+            "PDF/image inspection needs Pillow and pypdfium2, which AutoFA installs; "
+            "reinstall AutoFA. " + str(exc)
         )
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, ET.ParseError, csv.Error) as exc:
         result.update(status="error", complete=False, visual_complete=False)

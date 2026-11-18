@@ -3,12 +3,15 @@
 
 """Repository checks that CI runs outside pytest: the wheel install and the secrets scan."""
 
+import re
 import secrets
 import string
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
+
+import pytest
 
 from tools import check_wheel_install
 
@@ -41,6 +44,21 @@ def test_wheel_check_reports_modules_and_data_the_wheel_leaves_out(tmp_path):
         "pkg/templates/dropped.html is missing from the wheel",
         "pkg: package-data pattern 'static/*.js' matches no file",
     ]
+
+
+def test_wheel_check_reports_codec_bundling_distributions():
+    assert check_wheel_install.codec_distributions(("pytest", "autofa-no-such-dist")) == [
+        f"pytest {pytest.__version__} is installed; AutoFA must not depend on it"]
+
+
+def test_no_requirement_installs_codec_bundling_packages():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    requirements = project["dependencies"] + [
+        requirement for extra in project["optional-dependencies"].values()
+        for requirement in extra]
+    names = {re.split(r"[\s<>=!~;\[]", requirement, maxsplit=1)[0].lower().replace("_", "-")
+             for requirement in requirements}
+    assert names.isdisjoint(check_wheel_install.CODEC_DISTRIBUTIONS)
 
 
 def test_every_package_data_pattern_matches_a_source_file():
