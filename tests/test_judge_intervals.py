@@ -358,8 +358,34 @@ def _local_import_trace():
     return trace
 
 
-def test_local_import_identity_and_mirrored_model_call_calls_allow_bounded_receipt(tmp_path):
-    review = _review(tmp_path, _local_import_trace())
+def _mirror(trace):
+    return trace["execution"]["tool_calls"][1]
+
+
+def _set_mirror_arguments(trace, arguments):
+    _mirror(trace).update(args_full=arguments, args_chars=len(arguments))
+
+
+def _set_arguments(trace, original, mirror):
+    for call, value in zip(trace["execution"]["tool_calls"], (original, mirror), strict=True):
+        text = json.dumps(value)
+        call.update(args_full=text, args_chars=len(text))
+
+
+@pytest.mark.parametrize("mutation", [
+    pytest.param(lambda t: None, id="as_imported"),
+    pytest.param(lambda t: _set_arguments(t, {"command": "ls", "env": {"A": "1", "B": "2"}},
+                                          {"env": {"B": "2", "A": "1"}, "command": "ls"}),
+                 id="reordered_members"),
+    pytest.param(lambda t: t["execution"]["events"][-1].update(metadata={"n_tool_calls": 1}),
+                 id="metadata_count_agrees"),
+])
+def test_local_import_identity_and_mirrored_model_call_calls_allow_bounded_receipt(
+    tmp_path, mutation,
+):
+    trace = _local_import_trace()
+    mutation(trace)
+    review = _review(tmp_path, trace)
     navigation = review.interval_navigation()
     assert navigation["available"] and navigation["event_count"] == 3
     assert all(event["complete"] for event in navigation["events"])
@@ -370,20 +396,17 @@ def test_local_import_identity_and_mirrored_model_call_calls_allow_bounded_recei
     assert review.validate(_verdict(review, receipt, anchor)) is None
 
 
-def _mirror(trace):
-    return trace["execution"]["tool_calls"][1]
-
-
-def _set_mirror_arguments(trace, arguments):
-    _mirror(trace).update(args_full=arguments, args_chars=len(arguments))
-
-
 @pytest.mark.parametrize("mutation", [
     pytest.param(lambda t: t["evidence_scope"].pop("identity"), id="unverified_local_source"),
     pytest.param(lambda t: _set_mirror_arguments(t, '{"command": "rm -rf /"}'),
                  id="different_arguments"),
     pytest.param(lambda t: _set_mirror_arguments(t, '{"command": "ls ✓", "command": "rm"}'),
                  id="ambiguous_arguments"),
+    pytest.param(lambda t: _set_arguments(t, {"argv": ["ls", "-a"]}, {"argv": ["-a", "ls"]}),
+                 id="reordered_array"),
+    pytest.param(lambda t: _mirror(t).update(event_idx=False), id="boolean_event_id"),
+    pytest.param(lambda t: t["execution"]["events"][-1].update(metadata={"n_tool_calls": 2}),
+                 id="metadata_count_disagrees"),
     pytest.param(lambda t: _mirror(t).update(tool_name="python"), id="different_tool"),
     pytest.param(lambda t: _mirror(t).update(call_id_source="call-2"), id="unknown_call_id"),
     pytest.param(lambda t: _mirror(t).pop("call_id_source"), id="missing_call_id"),
