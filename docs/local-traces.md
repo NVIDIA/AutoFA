@@ -8,7 +8,10 @@ Parquet and trajectory JSONL inputs use the generic file loader.
 Automatic detection uses the bundled public reader dispatch. A standalone Harbor
 job needs its own configuration, including `jobs_dir`; an unrelated `config.json`
 is insufficient. A Gym or other supported host that embeds Harbor is imported as
-the host's complete run.
+the host's complete run. NeMo Gym model-call captures (`*.capture.jsonl`) may be
+symbolic links to a shared store outside the run folder; the import reads their
+contents. Other links that lead outside the run folder are refused, so a received
+folder cannot add your own files to its traces. Links to folders are not followed.
 
 For recognized runs, the bundled readers and importer produce versioned schema
 tables. The bundled AutoFA exporter supplies the canonical columns and labels;

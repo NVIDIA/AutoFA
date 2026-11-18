@@ -74,7 +74,11 @@ def _files(path: Path) -> tuple[Path, list[Path]]:
     else:
         raise ValueError(f"Expected a run folder or JSONL file: {path}")
     for file in files:
-        if not file.resolve().is_relative_to(root):
+        target = file.resolve()
+        # NeMo Gym can link model-call captures from a shared store outside the run
+        # folder. Only targets named as captures are followed, so a received run folder
+        # cannot pull the importing user's other files into its traces.
+        if not target.is_relative_to(root) and not target.name.endswith(".capture.jsonl"):
             raise ValueError(f"Source file escapes the selected run folder: {file.name}")
     return root, sorted(files, key=lambda p: p.relative_to(root).as_posix())
 

@@ -386,6 +386,44 @@ def test_cache_is_portable_and_invalidates_for_changed_bytes_or_metadata_overrid
     assert first.parquet_path.read_bytes() == previous_bytes
 
 
+def test_model_call_captures_linked_from_a_shared_store_import_by_content(
+    tmp_path, monkeypatch,
+):
+    capture = json.dumps({"model_call_id": "call-1"}) + "\n"
+    copied = gym_run(tmp_path / "copied")
+    (copied / "artifacts" / "model_calls").mkdir(parents=True)
+    (copied / "artifacts" / "model_calls" / "call-1.capture.jsonl").write_text(capture)
+    shared = tmp_path / "shared-captures"
+    shared.mkdir()
+    (shared / "call-1.capture.jsonl").write_text(capture)
+    linked = gym_run(tmp_path / "linked")
+    (linked / "artifacts" / "model_calls").mkdir(parents=True)
+    (linked / "artifacts" / "model_calls" / "call-1.capture.jsonl").symlink_to(
+        shared / "call-1.capture.jsonl"
+    )
+
+    expected = import_local_run(copied)
+    # A fresh profile keeps the second import from reusing the first snapshot.
+    monkeypatch.setenv("AUTOFA_HOME", str(tmp_path / "second-home"))
+    result = import_local_run(linked)
+
+    assert detect_reader(linked) == detect_reader(copied) is not None
+    assert result.store_id == expected.store_id
+    assert first_row(result.parquet_path) == first_row(expected.parquet_path)
+
+
+@pytest.mark.parametrize("name", ["notes.txt", "notes.capture.jsonl"])
+def test_links_to_other_files_outside_the_run_folder_are_refused(tmp_path, name):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("private key")
+    run = harbor_run(tmp_path / "harbor")
+    (run / "trial" / "artifacts").mkdir()
+    # The link's own name is chosen by whoever made the folder; its target's is not.
+    (run / "trial" / "artifacts" / name).symlink_to(secret)
+    with pytest.raises(ValueError, match="escapes the selected run folder"):
+        import_local_run(run)
+
+
 def test_corrupt_or_incomplete_store_never_reused(tmp_path):
     result = import_local_run(gym_run(tmp_path / "run"))
     table = result.parquet_path.parent / "tables" / "part_texts.parquet"
