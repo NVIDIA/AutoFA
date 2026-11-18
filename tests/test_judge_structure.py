@@ -129,8 +129,17 @@ def _trace_with_model_call(*, answer=False):
     return trace
 
 
-def test_conversation_rollups_do_not_count_separately_verified_model_call_telemetry():
+def _local_trace_with_model_call():
+    """The local EvalRDL import declares its table identity, not the API source label."""
     trace = _trace_with_model_call()
+    trace["evidence_scope"].update(identity="evalrdl_tables_v1",
+                                   source="local EvalRDL event parts and tool arguments")
+    return trace
+
+
+@pytest.mark.parametrize("build", [_trace_with_model_call, _local_trace_with_model_call])
+def test_conversation_rollups_do_not_count_separately_verified_model_call_telemetry(build):
+    trace = build()
     # A prior answer copied into a request is not a new action. Conversely,
     # response payloads are rejected below rather than mistaken for telemetry.
     text = '{"messages": [{"role": "assistant", "content": "B"}]}'
@@ -197,6 +206,8 @@ def _event(trace, index):
         limitations=["some execution events excluded"]), id="events_excluded"),
     pytest.param(_trace_with_model_call, lambda t: t["evidence_scope"].pop("source"),
                  id="unverified_lane_source"),
+    pytest.param(_local_trace_with_model_call, lambda t: t["evidence_scope"].pop("identity"),
+                 id="unverified_local_lane_identity"),
     pytest.param(_trace_with_model_call, lambda t: _event(t, -1).update(is_copied_context=True),
                  id="copied_context"),
     pytest.param(_trace_with_model_call, lambda t: _event(t, -1).update(length_truncated=True),
