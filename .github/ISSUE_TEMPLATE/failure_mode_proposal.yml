@@ -46,8 +46,8 @@ body:
         - Context and model
         - Memory and model
         - Tool and model
-        - Peer and model
-        - Subagent and model
+        - Model and model (peer)
+        - Model and model (subagent)
         - External environment and model
         - Local environment and model
         - Not sure
