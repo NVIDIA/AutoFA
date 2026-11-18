@@ -15,6 +15,7 @@ from autofa.metrics import claude_judge, codex_judge
 from autofa.metrics.claim_calibration import attach_calibration
 from autofa.metrics.judge_budget import (
     MAX_TEXT_CHARS,
+    MAX_TOOL_CALLS,
     ReviewBudget,
     ReviewBudgetError,
     plan_review_budget,
@@ -392,6 +393,69 @@ def test_upfront_local_plan_does_not_require_complete_unrelated_trace(tmp_path):
     plan = json.loads(prompt.splitlines()[-1])
     assert [row["field"] for row in plan["required_complete_fields"]] == ["detector_source"]
     assert plan["required_artifacts"] == [] and plan["whole_trace_requirements"] == []
+
+
+# Bounded intervals: only the interval bound during review must be read.
+
+
+@pytest.mark.parametrize("chars", [300_000, MAX_TEXT_CHARS + 20_000])
+def test_bounded_clause_without_event_order_is_planned_like_local(tmp_path, chars):
+    # Without certified event order no interval receipt can be issued, so reading
+    # the whole trace cannot support the clause; it is refuted locally or stays unknown.
+    review = _review(tmp_path, chars=chars, scope="bounded_interval")
+    assert not review.interval_navigation()["available"]
+    plan = plan_review_budget(review)
+    local = plan_review_budget(_review(tmp_path, chars=chars, scope="local", name="local"))
+    assert plan.scope == "bounded_interval" and plan.tool_call_limit < MAX_TOOL_CALLS
+    assert (plan.required_read_calls, plan.reread_calls, plan.evidence_chars) == (
+        local.required_read_calls, local.reread_calls, local.evidence_chars)
+
+
+@pytest.mark.parametrize("harness", HARNESSES)
+def test_unaffordable_bindable_interval_is_dispatched_at_the_ceiling(
+    tmp_path, monkeypatch, harness,
+):
+    review = _review(tmp_path, chars=MAX_TEXT_CHARS + 20_000, scope="bounded_interval",
+                     ordered=True)
+    assert review.interval_navigation()["available"]
+    plan = plan_review_budget(review)
+    # The audit keeps the full-trace projection, which the ceiling does not fund.
+    assert plan.scope == "bounded_interval" and plan.tool_call_limit == MAX_TOOL_CALLS
+    assert plan.required_read_calls + plan.reread_calls > MAX_TOOL_CALLS
+    assert plan.evidence_chars > MAX_TEXT_CHARS
+    allowances = []
+
+    async def turn(call, prompt, resume, allowance):
+        allowances.append(allowance)
+        assert not review.reads
+        raise RuntimeError("offline stop after dispatch")
+
+    runner = install_harness(monkeypatch, harness, turn)
+    with pytest.raises(RuntimeError, match="offline stop after dispatch"):
+        asyncio.run(runner(prompt="Frozen review", cwd=tmp_path, model="offline",
+                           cli_path=None, review=review))
+    # Claude max_turns and Codex max_tool_calls are fixed when the attempt starts.
+    assert allowances == [MAX_TOOL_CALLS]
+
+
+def test_whole_trace_and_unaffordable_work_outside_the_interval_still_fail_before_dispatch(
+    tmp_path,
+):
+    whole = _review(tmp_path, chars=MAX_TEXT_CHARS + 20_000, ordered=True, name="whole")
+    assert whole.interval_navigation()["available"]
+    with pytest.raises(ReviewBudgetError,
+                       match="before model dispatch: scope=whole_trace") as error:
+        plan_review_budget(whole)
+    assert error.value.capacity
+    review = _review(tmp_path, chars=MAX_TEXT_CHARS + 20_000, scope="bounded_interval",
+                     ordered=True)
+    review.snapshot["artifact_manifest"] = {"catalog": [
+        {"artifact_idx": index, "mime_type": "application/pdf"} for index in range(128)
+    ]}
+    with pytest.raises(ReviewBudgetError,
+                       match="before model dispatch: scope=bounded_interval") as error:
+        plan_review_budget(review)
+    assert error.value.capacity
 
 
 # Bounded completion: mechanical review gaps are finished without forcing confirmations.

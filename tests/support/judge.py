@@ -26,8 +26,12 @@ QUOTE = "The original input was overwritten."
 TEXT = QUOTE + " " + "Remaining events. " * 1000
 
 
-def _review(tmp_path, *, chars=None, scope="whole_trace", name="review"):
-    """Review TEXT, or a ``chars``-long trace opening with QUOTE, under one frozen claim."""
+def _review(tmp_path, *, chars=None, scope="whole_trace", name="review", ordered=False):
+    """Review TEXT, or a ``chars``-long trace opening with QUOTE, under one frozen claim.
+
+    Plain text has no certified event order; ``ordered`` stores the same text as one
+    step of an ordered envelope, so bounded intervals can be bound.
+    """
     contract = build_claim_contract(
         description=DESCRIPTION, mechanism="", source=SOURCE,
         defining_clauses=[{
@@ -39,8 +43,9 @@ def _review(tmp_path, *, chars=None, scope="whole_trace", name="review"):
         for requirement in contract["requirements"]:
             requirement["required_review_scope"] = scope
     text = TEXT if chars is None else (QUOTE + " Observed event." * (chars // 16 + 1))[:chars]
+    trace = {"steps": [{"source": "assistant", "message": text}]} if ordered else text
     return EvidenceReview(make_snapshot(
-        {"response_text": text}, item_id="case", source=SOURCE, claim_contract=contract,
+        {"response_text": trace}, item_id="case", source=SOURCE, claim_contract=contract,
     ), tmp_path / name)
 
 
