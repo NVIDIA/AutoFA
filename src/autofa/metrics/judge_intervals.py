@@ -163,16 +163,16 @@ def _json_int(text: str) -> int | tuple:
     return ("int", text) if text == "-0" else int(text)
 
 
-def _nonstandard_constant(name: str):
-    # NaN and Infinity are not JSON, so such text is compared as free-form text.
-    raise json.JSONDecodeError(f"nonstandard JSON constant {name}", name, 0)
-
-
 def _arguments(text: str) -> tuple:
-    """Decode JSON arguments losslessly; escaping and member order are not new actions."""
-    return _canonical(json.loads(text, object_pairs_hook=_unique_object,
-                                 parse_float=decimal.Decimal, parse_int=_json_int,
-                                 parse_constant=_nonstandard_constant))
+    """Decode JSON arguments losslessly; escaping and member order are not new actions.
+
+    NaN and Infinity are not JSON. Text using them must still decode without duplicate
+    keys, and is then compared exactly.
+    """
+    nonstandard: list[str] = []
+    value = json.loads(text, object_pairs_hook=_unique_object, parse_float=decimal.Decimal,
+                       parse_int=_json_int, parse_constant=nonstandard.append)
+    return ("text", text) if nonstandard else _canonical(value)
 
 
 def _mirrors(mirror: dict, original: dict) -> bool:
