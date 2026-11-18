@@ -384,6 +384,8 @@ def _set_arguments(trace, original, mirror):
                  id="reordered_members"),
     pytest.param(lambda t: _set_raw_arguments(t, "*** Begin Patch"),
                  id="identical_free_form_arguments"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"limit": NaN}'),
+                 id="identical_nonstandard_constant"),
     pytest.param(lambda t: t["execution"]["events"][-1].update(metadata={"n_tool_calls": 1}),
                  id="metadata_count_agrees"),
 ])
@@ -424,6 +426,8 @@ def test_local_import_identity_and_mirrored_model_call_calls_allow_bounded_recei
                  id="negative_zero_int"),
     pytest.param(lambda t: _set_raw_arguments(t, '{"t": 1e9999999999999999999}'),
                  id="unrepresentable_number"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"limit":Infinity}', '{ "limit": Infinity }'),
+                 id="nonstandard_constant"),
     pytest.param(lambda t: [call.update(tool_name=name) for call, name in zip(
         t["execution"]["tool_calls"], (1, True), strict=True)], id="tool_name_type"),
     pytest.param(lambda t: _set_arguments(t, {"argv": ["ls", "-a"]}, {"argv": ["-a", "ls"]}),
