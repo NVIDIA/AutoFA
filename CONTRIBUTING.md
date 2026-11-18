@@ -44,7 +44,8 @@ Maintainers may close a pull request outside this scope or ask for an issue firs
 ## Questions, bugs, and security
 
 Use the repository's issue tracker for ordinary bugs, feature requests, and
-documentation questions. The issue forms ask for a minimal reproduction and
+documentation questions, and for [failure-mode proposals](docs/taxonomy-classification.md#proposing-a-failure-mode)
+for the built-in taxonomy. The issue forms ask for a minimal reproduction and
 environment details. Use synthetic traces and redact credentials, personal
 information, private datasets, and internal service details from all examples.
 
