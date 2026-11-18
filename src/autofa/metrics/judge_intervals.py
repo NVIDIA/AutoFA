@@ -184,8 +184,9 @@ def _mirrors(mirror: dict, original: dict) -> bool:
     try:
         return _arguments(left) == _arguments(right)
     except json.JSONDecodeError:
-        # Free-form arguments are not JSON; only an exact copy repeats the call.
-        return left == right
+        # Free-form arguments are not JSON; only an exact copy repeats the call. A
+        # malformed object or array is not free-form, and its keys cannot be checked.
+        return left == right and not left.lstrip(" \t\n\r﻿").startswith(("{", "["))
     except (ValueError, ArithmeticError, RecursionError):
         # Duplicate keys, unrepresentable numbers or excessive depth: not a verified copy.
         return False
@@ -218,8 +219,11 @@ def _check_response_mirrors(
 def _context_capture(event: dict) -> bool:
     if event.get("is_copied_context") is True:
         return True
-    if _model_call_telemetry(event) and not event.get("n_tool_calls"):
+    metadata = event.get("metadata")
+    if (_model_call_telemetry(event) and not event.get("n_tool_calls")
+            and not (isinstance(metadata, dict) and metadata.get("n_tool_calls"))):
         # Importer-declared request telemetry/context, not an assistant execution.
+        # Metadata that declares calls conflicts with this, so it is not context.
         return True
     parts = event.get("parts")
     if event.get("kind") != "other" or event.get("role") != "harness":
