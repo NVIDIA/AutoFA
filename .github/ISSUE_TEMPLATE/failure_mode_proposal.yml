@@ -4,7 +4,6 @@
 name: Failure-mode proposal
 description: Propose a new failure mode, or a change to an existing one, in the built-in taxonomy.
 title: "[Taxonomy]: "
-labels: ["taxonomy"]
 body:
   - type: markdown
     attributes:
