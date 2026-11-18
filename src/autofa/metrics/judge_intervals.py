@@ -146,8 +146,8 @@ def _response_telemetry(event: dict) -> bool:
 
 
 def _arguments(text: str) -> str:
-    """Re-serialize decoded JSON arguments; escaping differences are not new actions."""
-    return json.dumps(json.loads(text, object_pairs_hook=_unique_object))
+    """Re-serialize decoded JSON arguments; escaping and member order are not new actions."""
+    return json.dumps(json.loads(text, object_pairs_hook=_unique_object), sort_keys=True)
 
 
 def _mirrors(mirror: dict, original: dict) -> bool:
@@ -320,9 +320,14 @@ def _navigation(snapshot: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
                         and type(event_id) is int and _response_telemetry(record)):
                     if (lane, event_id) in declared:
                         raise ValueError("ambiguous original event identity")
+                    metadata = record.get("metadata")
+                    if metadata is not None and (not isinstance(metadata, dict) or _count_mismatch(
+                            metadata, "n_tool_calls", record["n_tool_calls"])):
+                        raise ValueError("model-call tool calls disagree with their declared count")
                     declared[(lane, event_id)] = record["n_tool_calls"]
                     continue
-                if name == "tool_calls" and (lane, event_id) in declared:
+                if (name == "tool_calls" and type(event_id) is int
+                        and (lane, event_id) in declared):
                     mirrors.append(record)
                     continue
                 if (lane != scope["event_lane"] or type(event_id) is not int
