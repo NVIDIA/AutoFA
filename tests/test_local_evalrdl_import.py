@@ -387,7 +387,9 @@ def test_cache_is_portable_and_invalidates_for_changed_bytes_or_metadata_overrid
     assert first.parquet_path.read_bytes() == previous_bytes
 
 
-def test_model_call_captures_linked_from_a_shared_store_are_read(tmp_path, monkeypatch):
+# Gym's capture folder is configurable; under artifacts/ two reader inputs share the read.
+@pytest.mark.parametrize("capture_dir", ["artifacts/model_calls", "artifacts"])
+def test_model_call_captures_linked_from_a_shared_store_are_read(tmp_path, capture_dir):
     def captured_call(record):
         record["ng_model_call_capture"] = {"calls": [
             {"model_call_id": "call-1", "dialect": "chat", "call_index": 0},
@@ -401,28 +403,121 @@ def test_model_call_captures_linked_from_a_shared_store_are_read(tmp_path, monke
     shared = tmp_path / "shared-captures"
     shared.mkdir()
     (shared / "call-1.capture.jsonl").write_text(capture)
-    runs = {}
+    rows, store_ids = {}, {}
     for kind in ("regular", "linked"):
         run = gym_run(tmp_path / kind, edit=captured_call)
-        captures = run / "artifacts" / "model_calls"
+        captures = run / capture_dir
         captures.mkdir(parents=True)
         if kind == "regular":
             (captures / "call-1.capture.jsonl").write_text(capture)
         else:
             (captures / "call-1.capture.jsonl").symlink_to(shared / "call-1.capture.jsonl")
-        # A separate profile per import keeps the second from reusing the first snapshot.
-        monkeypatch.setenv("AUTOFA_HOME", str(tmp_path / f"{kind}-home"))
-        runs[kind] = import_local_run(run)
+        result = import_local_run(run)
+        rows[kind], store_ids[kind] = first_row(result.parquet_path), result.store_id
 
-    regular, linked = runs["regular"], runs["linked"]
-    assert linked.store_id == regular.store_id
-    assert linked.parquet_path != regular.parquet_path
-    row = first_row(linked.parquet_path)
-    assert row == first_row(regular.parquet_path)
-    # The rollout does not hold this parameter; only the linked capture does. Gym's
-    # inline record keeps the call's messages, so the capture's copy is not imported.
+    # Readers see only part of a linked capture, so the linked run never reuses the
+    # snapshot of the same bytes imported as a regular file.
+    assert store_ids["linked"] != store_ids["regular"]
+    for row in rows.values():
+        # The rollout does not hold this parameter; only the capture does. Gym's inline
+        # record keeps the call's messages, so the capture's copy is not imported.
+        assert "temperature=0.37" in row["response_text"]
+        assert "LINKED_REQUEST_MESSAGE" not in json.dumps(row)
+    events = {kind: json.loads(row["response_text"])["execution"]["events"]
+              for kind, row in rows.items()}
+    assert len(events["linked"]) == len(events["regular"])
+
+
+def linked_store_holds(home: Path, marker: bytes) -> list[str]:
+    return [p.name for p in home.rglob("*") if p.is_file() and marker in p.read_bytes()]
+
+
+def test_linked_capture_contributes_only_numeric_parameters_model_and_tool_names(
+    tmp_path, monkeypatch,
+):
+    def captured_call(record):
+        record["ng_model_call_capture"] = {"calls": [
+            {"model_call_id": "call-1", "dialect": "responses", "call_index": 0},
+        ]}
+
+    outside = tmp_path / "shared" / "other-run.capture.jsonl"
+    outside.parent.mkdir()
+    outside.write_text(json.dumps({
+        "model_call_id": "call-1",
+        "request": {
+            "model": "linked-model", "temperature": 0.37,
+            "instructions": "HIDDEN_INSTRUCTIONS", "metadata": {"note": "HIDDEN_METADATA"},
+            "tools": [{"type": "function", "name": "lookup",
+                       "description": "HIDDEN_TOOL_DESCRIPTION"}],
+        },
+        "response": {"output": [
+            {"type": "message", "id": "HIDDEN_ITEM_ID",
+             "content": [{"type": "output_text", "text": "HIDDEN_RESPONSE"}]},
+            {"type": "function_call", "id": "HIDDEN_CALL_ITEM", "call_id": "HIDDEN_CALL_ID",
+             "name": "lookup", "arguments": "{}"},
+        ]},
+        "unknown": "HIDDEN_FIELD",
+    }) + "\n")
+    run = gym_run(tmp_path / "gym", edit=captured_call)
+    (run / "model_calls").mkdir()
+    (run / "model_calls" / "call-1.capture.jsonl").symlink_to(outside)
+    home = tmp_path / "linked-home"
+    monkeypatch.setenv("AUTOFA_HOME", str(home))
+
+    row = first_row(import_local_run(run).parquet_path)
     assert "temperature=0.37" in row["response_text"]
-    assert "LINKED_REQUEST_MESSAGE" not in json.dumps(row)
+    for marker in (b"HIDDEN_INSTRUCTIONS", b"HIDDEN_METADATA", b"HIDDEN_TOOL_DESCRIPTION",
+                   b"HIDDEN_ITEM_ID", b"HIDDEN_RESPONSE", b"HIDDEN_CALL_ID", b"HIDDEN_FIELD"):
+        assert not linked_store_holds(home, marker), marker
+
+
+def test_linked_capture_read_by_another_reader_input_keeps_only_parameters(
+    tmp_path, monkeypatch,
+):
+    def text(key, value):
+        return {"key": key, "value": {"stringValue": value}}
+
+    span = {"spanId": "s1", "startTimeUnixNano": "2000", "endTimeUnixNano": "3000",
+            "attributes": [
+                text("openinference.span.kind", "LLM"), text("llm.model_name", "m"),
+                text("llm.input_messages.0.message.role", "user"),
+                text("llm.input_messages.0.message.content", "HIDDEN_SPAN_TEXT"),
+            ]}
+    outside = tmp_path / "shared" / "other-run.capture.jsonl"
+    outside.parent.mkdir()
+    outside.write_text(json.dumps({
+        "model_call_id": "call-1", "resourceSpans": [{"scopeSpans": [{"spans": [span]}]}],
+    }) + "\n")
+    run = harbor_run(tmp_path / "harbor")
+    traces = run / "trial" / "agent" / "artifacts" / "traces"
+    traces.mkdir(parents=True)
+    (traces / "a.capture.jsonl").symlink_to(outside)
+    # Harbor's trace input names the last file it parsed, here a run-owned one.
+    (traces / "b.jsonl").write_text(json.dumps({"resourceSpans": []}) + "\n")
+    home = tmp_path / "linked-home"
+    monkeypatch.setenv("AUTOFA_HOME", str(home))
+
+    import_local_run(run)
+    assert not linked_store_holds(home, b"HIDDEN_SPAN_TEXT")
+
+
+@pytest.mark.parametrize("names", [
+    ("eval_metadata.json", "rollouts.capture.jsonl"), ("notes.capture.jsonl",),
+])
+def test_linked_capture_without_a_recognized_run_is_refused(tmp_path, names):
+    outside = tmp_path / "shared" / "other-run.capture.jsonl"
+    outside.parent.mkdir()
+    outside.write_text(json.dumps({"model_call_id": "call-1", "response": {}}) + "\n")
+    folder = tmp_path / "download"
+    folder.mkdir()
+    for name in names:
+        if name.endswith(".capture.jsonl"):
+            (folder / name).symlink_to(outside)
+        else:
+            (folder / name).write_text(json.dumps({"model": "model", "dataset": "toy"}))
+    # Generic loaders would read the linked file whole, so discovery stops here.
+    with pytest.raises(ValueError, match="need a recognized run"):
+        discover_eval_sources(folder)
 
 
 @pytest.mark.parametrize(("name", "target"), [
@@ -450,6 +545,24 @@ def test_linked_capture_read_as_another_input_is_refused(tmp_path):
     # Harbor keeps every file under artifacts/, so the link would be stored in full.
     (run / "trial" / "artifacts" / "notes.capture.jsonl").symlink_to(outside)
     with pytest.raises(ValueError, match="was read as run data"):
+        import_local_run(run)
+    assert not list((Path(os.environ["AUTOFA_HOME"]) / "sources").glob("*/manifest.json"))
+
+
+def test_linked_capture_referenced_as_an_artifact_is_refused(tmp_path):
+    outside = tmp_path / "other.capture.jsonl"
+    outside.write_text('{"model_call_id": "call-1"}\n')
+    run = harbor_run(tmp_path / "harbor")
+    (run / "trial" / "agent" / "notes.capture.jsonl").symlink_to(outside)
+    trajectory = run / "trial" / "agent" / "trajectory.json"
+    document = json.loads(trajectory.read_text())
+    # The trajectory, not the link, is the file read here; the image names the link.
+    document["steps"][0]["message"] = [
+        {"type": "input_text", "text": "Inspect this image"},
+        {"type": "input_image", "image_url": "file://trial/agent/notes.capture.jsonl"},
+    ]
+    trajectory.write_text(json.dumps(document))
+    with pytest.raises(SourceDataError, match="cannot be an artifact"):
         import_local_run(run)
     assert not list((Path(os.environ["AUTOFA_HOME"]) / "sources").glob("*/manifest.json"))
 

@@ -107,11 +107,58 @@ class _InputTree:
             return handle.read() if limit is None else handle.read(limit)
 
     def open(self, path: str):
+        if path in self.linked:
+            # A real file: inputs that share a read need its file descriptor.
+            handle = tempfile.TemporaryFile()
+            handle.write(_linked_capture_view(self._files[path]))
+            handle.seek(0)
+            return handle
         return self._files[path].open("rb", buffering=1024 * 1024)
 
     def fingerprint(self) -> str:
         files = [(name, file_digest(path)) for name, path in self._files.items()]
-        return _hash(files)
+        # Readers see less of a linked capture, so the same bytes linked and copied are
+        # different imports. Trees without links keep their existing identity.
+        return _hash([files, sorted(self.linked)] if self.linked else files)
+
+
+def _linked_capture_view(path: Path) -> bytes:
+    """A capture linked from outside the run folder, reduced before any reader sees it.
+
+    Each record keeps its call id and, of its request, the numeric and boolean
+    parameters, the model name and the tool names. Messages, prompt text in other
+    fields, responses and anything else a reader might keep are dropped, so a link to
+    another run's capture contributes only these parameters, whichever input reads it.
+    """
+    view = []
+    with path.open("rb") as handle:
+        for line in handle:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(record, dict) or not isinstance(
+                record.get("model_call_id"), str | int
+            ):
+                continue
+            request = record.get("request")
+            request = request if isinstance(request, dict) else {}
+            kept = {
+                key: value for key, value in request.items()
+                if isinstance(value, int | float) or (key == "model" and isinstance(value, str))
+            }
+            tools = []
+            for tool in request.get("tools") or ():
+                function = tool.get("function") if isinstance(tool, dict) else None
+                name = (function.get("name") if isinstance(function, dict) else None) or (
+                    tool.get("name") if isinstance(tool, dict) else None
+                )
+                if isinstance(name, str):
+                    tools.append({"name": name})
+            if tools:
+                kept["tools"] = tools
+            view.append({"model_call_id": record["model_call_id"], "request": kept})
+    return "".join(json.dumps(record) + "\n" for record in view).encode()
 
 
 def _refuse_linked_records(result, linked: set[str]) -> None:
@@ -136,7 +183,15 @@ def detect_reader(path: Path | str) -> str | None:
     path = Path(path).expanduser().resolve()
     if not path.is_dir() and not (path.is_file() and path.suffix == ".jsonl"):
         return None
-    reader = reader_dispatch().pick(_InputTree(path))
+    tree = _InputTree(path)
+    reader = reader_dispatch().pick(tree)
+    if reader is None and tree.linked:
+        # Generic loaders read selected files whole; only a declared reader gets the
+        # reduced view of a linked capture.
+        raise ValueError(
+            "Linked captures outside the selected run folder need a recognized run: "
+            f"{sorted(tree.linked)[0]}"
+        )
     return reader.name if reader is not None else None
 
 
@@ -481,6 +536,11 @@ def _capture_artifacts(conversion, tree, staged):
         data = None
         if isinstance(uri, str) and uri.startswith("file://"):
             relative = uri[len("file://"):]
+            if relative in tree.linked:
+                raise SourceDataError(
+                    f"Linked capture outside the selected run folder cannot be an artifact: "
+                    f"{relative}"
+                )
             original = tree._files.get(relative)
             if original is None:
                 continue
