@@ -7,6 +7,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 import shutil
 import urllib.request
 from collections import Counter
@@ -386,42 +387,71 @@ def test_cache_is_portable_and_invalidates_for_changed_bytes_or_metadata_overrid
     assert first.parquet_path.read_bytes() == previous_bytes
 
 
-def test_model_call_captures_linked_from_a_shared_store_are_read(tmp_path):
+def test_model_call_captures_linked_from_a_shared_store_are_read(tmp_path, monkeypatch):
     def captured_call(record):
         record["ng_model_call_capture"] = {"calls": [
             {"model_call_id": "call-1", "dialect": "chat", "call_index": 0},
         ]}
 
-    shared = tmp_path / "shared-captures"
-    shared.mkdir()
-    (shared / "call-1.capture.jsonl").write_text(json.dumps({
+    capture = json.dumps({
         "model_call_id": "call-1",
         "request": {"temperature": 0.37,
                     "messages": [{"role": "user", "content": "LINKED_REQUEST_MESSAGE"}]},
-    }) + "\n")
-    run = gym_run(tmp_path / "gym", edit=captured_call)
-    (run / "artifacts" / "model_calls").mkdir(parents=True)
-    (run / "artifacts" / "model_calls" / "call-1.capture.jsonl").symlink_to(
-        shared / "call-1.capture.jsonl"
-    )
+    }) + "\n"
+    shared = tmp_path / "shared-captures"
+    shared.mkdir()
+    (shared / "call-1.capture.jsonl").write_text(capture)
+    runs = {}
+    for kind in ("regular", "linked"):
+        run = gym_run(tmp_path / kind, edit=captured_call)
+        captures = run / "artifacts" / "model_calls"
+        captures.mkdir(parents=True)
+        if kind == "regular":
+            (captures / "call-1.capture.jsonl").write_text(capture)
+        else:
+            (captures / "call-1.capture.jsonl").symlink_to(shared / "call-1.capture.jsonl")
+        # A separate profile per import keeps the second from reusing the first snapshot.
+        monkeypatch.setenv("AUTOFA_HOME", str(tmp_path / f"{kind}-home"))
+        runs[kind] = import_local_run(run)
 
-    row = first_row(import_local_run(run).parquet_path)
+    regular, linked = runs["regular"], runs["linked"]
+    assert linked.store_id == regular.store_id
+    assert linked.parquet_path != regular.parquet_path
+    row = first_row(linked.parquet_path)
+    assert row == first_row(regular.parquet_path)
     # The rollout does not hold this parameter; only the linked capture does. Gym's
     # inline record keeps the call's messages, so the capture's copy is not imported.
     assert "temperature=0.37" in row["response_text"]
     assert "LINKED_REQUEST_MESSAGE" not in json.dumps(row)
 
 
-@pytest.mark.parametrize("name", ["notes.txt", "notes.capture.jsonl"])
-def test_links_to_other_files_outside_the_run_folder_are_refused(tmp_path, name):
-    secret = tmp_path / "secret.txt"
-    secret.write_text("private key")
-    run = harbor_run(tmp_path / "harbor")
-    (run / "trial" / "artifacts").mkdir()
-    # The link's own name is chosen by whoever made the folder; its target's is not.
-    (run / "trial" / "artifacts" / name).symlink_to(secret)
+@pytest.mark.parametrize(("name", "target"), [
+    ("notes.txt", "secret.txt"),
+    ("notes.capture.jsonl", "secret.txt"),
+    ("rollouts.jsonl", "other.capture.jsonl"),
+])
+def test_links_to_other_files_outside_the_run_folder_are_refused(tmp_path, name, target):
+    outside = tmp_path / target
+    outside.write_text("{}\n")
+    run = gym_run(tmp_path / "gym")
+    (run / name).unlink(missing_ok=True)
+    # Whoever made the folder chooses the link's name, but not its target's; a capture
+    # linked under another name would be read as run records, not as a capture.
+    (run / name).symlink_to(outside)
     with pytest.raises(ValueError, match="escapes the selected run folder"):
         import_local_run(run)
+
+
+def test_linked_capture_read_as_another_input_is_refused(tmp_path):
+    outside = tmp_path / "other.capture.jsonl"
+    outside.write_text('{"model_call_id": "call-1"}\n')
+    run = harbor_run(tmp_path / "harbor")
+    (run / "trial" / "artifacts").mkdir()
+    # Harbor keeps every file under artifacts/, so the link would be stored in full.
+    (run / "trial" / "artifacts" / "notes.capture.jsonl").symlink_to(outside)
+    with pytest.raises(ValueError, match="was read as run data"):
+        import_local_run(run)
+    assert not list((Path(os.environ["AUTOFA_HOME"]) / "sources").glob("*/manifest.json"))
 
 
 def test_corrupt_or_incomplete_store_never_reused(tmp_path):

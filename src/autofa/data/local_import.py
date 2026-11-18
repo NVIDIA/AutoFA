@@ -76,9 +76,12 @@ def _files(path: Path) -> tuple[Path, list[Path]]:
     for file in files:
         target = file.resolve()
         # NeMo Gym can link model-call captures from a shared store outside the run
-        # folder. Only targets named as captures are followed, so a received run folder
-        # cannot pull the importing user's other files into its traces.
-        if not target.is_relative_to(root) and not target.name.endswith(".capture.jsonl"):
+        # folder. Such a link is followed only when both it and its target are named as
+        # captures: the target's name is not chosen by the run folder's author, and the
+        # link's name makes the reader treat the bytes as a capture, not as run records.
+        if not target.is_relative_to(root) and not all(
+            name.endswith(".capture.jsonl") for name in (file.name, target.name)
+        ):
             raise ValueError(f"Source file escapes the selected run folder: {file.name}")
     return root, sorted(files, key=lambda p: p.relative_to(root).as_posix())
 
@@ -92,6 +95,8 @@ class _InputTree:
         self.root, files = _files(path)
         self.name = path.name
         self._files = {p.relative_to(self.root).as_posix(): p for p in files}
+        self.linked = {name for name, p in self._files.items()
+                       if not p.resolve().is_relative_to(self.root)}
         self._entries = [Entry(name, p.stat().st_size) for name, p in self._files.items()]
 
     def paths(self):
@@ -107,6 +112,23 @@ class _InputTree:
     def fingerprint(self) -> str:
         files = [(name, file_digest(path)) for name, path in self._files.items()]
         return _hash(files)
+
+
+def _refuse_linked_records(result, linked: set[str]) -> None:
+    """Refuse a read that kept records from a capture linked from outside the run folder.
+
+    The Gym reader joins a linked capture's request parameters to the run's own calls,
+    and those rows name the run's records. A row naming the linked file means another
+    input, such as Harbor's artifact listing, kept that file's contents.
+    """
+    for bucket in (result.rows, result.losers):
+        for rows in bucket.values():
+            for row in rows:
+                if row.at_path in linked:
+                    raise ValueError(
+                        f"Linked capture outside the selected run folder was read as run "
+                        f"data: {row.at_path}"
+                    )
 
 
 def detect_reader(path: Path | str) -> str | None:
@@ -250,6 +272,7 @@ def import_local_run(
         return _import_result(store)
     dispatch = reader_dispatch()
     result = dispatch.read(tree)
+    _refuse_linked_records(result, tree.linked)
     if not result.claimed:
         raise SourceDataError(f"No declared reader recognizes {path}")
     # Source run identity follows bytes, independently of adapter version and cache location.

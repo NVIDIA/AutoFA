@@ -9,12 +9,15 @@ Automatic detection uses the bundled public reader dispatch. A standalone Harbor
 job needs its own configuration, including `jobs_dir`; an unrelated `config.json`
 is insufficient. A Gym or other supported host that embeds Harbor is imported as
 the host's complete run. NeMo Gym model-call captures may be symbolic links to a
-shared store outside the run folder. The import follows such a link when the file
-it points to is named `*.capture.jsonl`; it does not check that the capture belongs
-to this run. It keeps the request parameters and tool names of the captured calls
-that the run's records name. Other links that lead outside the run folder are
-refused, and links to folders are not followed. Import only run folders, and linked
-captures, that you trust.
+shared store outside the evaluation run folder. The import follows such a link only
+when both the link and the file it points to are named `*.capture.jsonl`, and reads
+that file as a capture. It does not check that the capture belongs to this
+evaluation run. From a capture, it keeps the request parameters and tool names of
+the captured calls that the evaluation run's records name. If a reader would keep
+a linked capture's records in another way, for example as a Harbor artifact, the
+import is refused. Other links that lead outside the evaluation run folder are
+refused, and links to folders are not followed. Import only evaluation run
+folders, and linked captures, that you trust.
 
 For recognized runs, the bundled readers and importer produce versioned schema
 tables. The bundled AutoFA exporter supplies the canonical columns and labels;
