@@ -386,30 +386,30 @@ def test_cache_is_portable_and_invalidates_for_changed_bytes_or_metadata_overrid
     assert first.parquet_path.read_bytes() == previous_bytes
 
 
-def test_model_call_captures_linked_from_a_shared_store_import_by_content(
-    tmp_path, monkeypatch,
-):
-    capture = json.dumps({"model_call_id": "call-1"}) + "\n"
-    copied = gym_run(tmp_path / "copied")
-    (copied / "artifacts" / "model_calls").mkdir(parents=True)
-    (copied / "artifacts" / "model_calls" / "call-1.capture.jsonl").write_text(capture)
+def test_model_call_captures_linked_from_a_shared_store_are_read(tmp_path):
+    def captured_call(record):
+        record["ng_model_call_capture"] = {"calls": [
+            {"model_call_id": "call-1", "dialect": "chat", "call_index": 0},
+        ]}
+
     shared = tmp_path / "shared-captures"
     shared.mkdir()
-    (shared / "call-1.capture.jsonl").write_text(capture)
-    linked = gym_run(tmp_path / "linked")
-    (linked / "artifacts" / "model_calls").mkdir(parents=True)
-    (linked / "artifacts" / "model_calls" / "call-1.capture.jsonl").symlink_to(
+    (shared / "call-1.capture.jsonl").write_text(json.dumps({
+        "model_call_id": "call-1",
+        "request": {"temperature": 0.37,
+                    "messages": [{"role": "user", "content": "LINKED_REQUEST_MESSAGE"}]},
+    }) + "\n")
+    run = gym_run(tmp_path / "gym", edit=captured_call)
+    (run / "artifacts" / "model_calls").mkdir(parents=True)
+    (run / "artifacts" / "model_calls" / "call-1.capture.jsonl").symlink_to(
         shared / "call-1.capture.jsonl"
     )
 
-    expected = import_local_run(copied)
-    # A fresh profile keeps the second import from reusing the first snapshot.
-    monkeypatch.setenv("AUTOFA_HOME", str(tmp_path / "second-home"))
-    result = import_local_run(linked)
-
-    assert detect_reader(linked) == detect_reader(copied) is not None
-    assert result.store_id == expected.store_id
-    assert first_row(result.parquet_path) == first_row(expected.parquet_path)
+    row = first_row(import_local_run(run).parquet_path)
+    # The rollout does not hold this parameter; only the linked capture does. Gym's
+    # inline record keeps the call's messages, so the capture's copy is not imported.
+    assert "temperature=0.37" in row["response_text"]
+    assert "LINKED_REQUEST_MESSAGE" not in json.dumps(row)
 
 
 @pytest.mark.parametrize("name", ["notes.txt", "notes.capture.jsonl"])
