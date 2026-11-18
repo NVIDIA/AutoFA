@@ -429,7 +429,14 @@ def test_model_call_captures_linked_from_a_shared_store_are_read(tmp_path, captu
 
 
 def linked_store_holds(home: Path, marker: bytes) -> list[str]:
-    return [p.name for p in home.rglob("*") if p.is_file() and marker in p.read_bytes()]
+    """Files under ``home`` holding ``marker``, with Parquet compared by decoded values."""
+    def content(path: Path) -> bytes:
+        if path.suffix == ".parquet":
+            rows = pq.read_table(path).to_pylist()
+            return json.dumps(rows, default=str, ensure_ascii=False).encode()
+        return path.read_bytes()
+
+    return [p.name for p in home.rglob("*") if p.is_file() and marker in content(p)]
 
 
 def test_linked_capture_contributes_only_numeric_parameters_model_and_tool_names(
