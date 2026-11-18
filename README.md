@@ -149,6 +149,7 @@ Results persist under `~/.autofa/`.
 | Inputs: local NeMo Gym / Harbor and remote EvalRDL | [Datasets and rollout selection](docs/datasets.md) · [Local imports and traces](docs/local-traces.md) |
 | Models, endpoints, analysis settings and skills | [Configuration](docs/configuration.md) · [LLM endpoints](docs/llm-endpoints.md) |
 | Writing, validating and scoring detectors | [Detectors](docs/detectors.md) · [Metrics and feedback](docs/metrics.md) |
+| Office rendering, audio, video and speech readers | [Artifact inspection dependencies](docs/artifact-dependencies.md) |
 | Reports, saved libraries, publishing and storage | [Failure library and saved results](docs/library.md) |
 | Token usage, spend and projections | [Usage and cost accounting](docs/usage-accounting.md) |
 
@@ -170,6 +171,10 @@ Results persist under `~/.autofa/`.
 - Initial reading of local runs holds the run in memory, so very large rollouts or expanded
   request histories can exceed the hydration batch budget. Supplying missing metadata
   labels currently rereads the original logs.
+- AutoFA ships no FFmpeg or PyAV; its only codec libraries are Pillow's AV1 and WebP image
+  codecs. Inspecting audio and video artifacts needs a PyAV that you build as described in
+  [audio, video and speech](docs/artifact-dependencies.md#audio-video-and-speech);
+  otherwise those artifacts are reported unavailable.
 
 ## Support and contributing
 

@@ -420,11 +420,13 @@ not necessarily tools available to this discovery session.
    limitations; unavailable evidence means abstain, not false. Text extraction is not visual
    inspection. For video, inspect the manifest and select a 1-based decoded frame with
    `view_artifact(page=N)`; this does not inspect other frames or audio. Unsupported formats
-   retain downloadable original bytes, but do not count as inspected evidence.
-   Missing supported readers can be installed on demand with
-   `prepare_artifact_support(capability='office'|'audio'|'speech', install=True)`; speech
-   also downloads the selected local model. ZIP files expose a member inventory; select
-   `member_path` in download/read/view/transcribe tools instead of unpacking every file.
+   retain downloadable original bytes, but do not count as inspected evidence. An
+   unavailable audio/video reader or codec is likewise an evidence gap, not absence.
+   Check readers with `prepare_artifact_support(capability='office'|'audio'|'speech')`.
+   With `install=True`, office installs LibreOffice and speech downloads the selected local
+   model once the user has installed PyAV and faster-whisper; audio only checks for PyAV.
+   ZIP files expose a member inventory; select `member_path` in download/read/view/transcribe
+   tools instead of unpacking every file.
    Audio pages show 30-second signal plots. `transcribe_artifact` returns a timestamped
    speech estimate for a selected window; it can be wrong and does not inspect music,
    tone or perceptual sound quality. Downloads and transcription remain local, with

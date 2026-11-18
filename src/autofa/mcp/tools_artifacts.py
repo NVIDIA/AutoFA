@@ -85,8 +85,10 @@ def view_artifact(
     PDFs/images use installed PDFium/Pillow; Office visual rendering requires LibreOffice.
     Videos use PyAV: page selects the decoded frame number. Read the artifact manifest
     for duration/frame metadata. A viewed frame does not inspect other frames or audio.
-    Audio pages show 30-second waveform/spectrogram windows, not listening. For ZIPs,
-    choose member_path from read_artifact's archive inventory; only that file is extracted.
+    Audio pages show 30-second waveform/spectrogram windows, not listening. Audio/video
+    without the user-built PyAV or the file's codec is unavailable: an evidence gap, not
+    absence. For ZIPs, choose member_path from read_artifact's archive inventory; only that
+    file is extracted.
     Reports missing renderers, unsupported media and page bounds explicitly.
     """
     from autofa import trace
@@ -105,10 +107,12 @@ def view_artifact(
 def prepare_artifact_support(
     capability: str, install: bool = False, model: str = "base",
 ) -> dict[str, Any]:
-    """Check/install supported artifact readers on demand: office, audio, or speech.
+    """Check/prepare supported artifact readers on demand: office, audio, or speech.
 
-    install=True installs the fixed dependency set; speech also downloads the selected
-    tiny/base/small local model. Does not accept arbitrary packages, URLs or shell commands.
+    install=True installs LibreOffice for office. Audio only checks for the user-built PyAV.
+    Speech checks for PyAV and faster-whisper and, with install=True, downloads the selected
+    tiny/base/small local model; it never installs Python packages.
+    Does not accept arbitrary packages, URLs or shell commands.
     Files are processed locally; no artifact content is sent to a transcription API.
     """
     from autofa.data.artifact_dependencies import prepare_artifact_support as prepare

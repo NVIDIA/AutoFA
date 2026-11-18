@@ -413,6 +413,7 @@ def artifact_image(
     Select ZIP members with member_path. Pass available receipts to
     llm_client.classify(prompt, text, images=[image]) with a vision-capable model.
     Check status/limitations: signal plots are not listening; Office needs LibreOffice.
+    Audio/video need a user-built PyAV; a missing reader or codec is an evidence gap.
     Use artifact() for text. Failed image reads never silently fall back to text.
     """
     from autofa.data.artifact_access import artifact_image as read_image
@@ -427,8 +428,9 @@ def artifact_transcript(
 ) -> ArtifactTranscript:
     """Read a local, timestamped speech estimate; never implies sound-quality inspection.
 
-    Use prepare_artifact_support('speech', install=True) in discovery to install the
-    reader and selected model first. Detector calls never install or download models.
+    Use prepare_artifact_support('speech', install=True) in discovery to download the
+    selected model first, once the user has installed PyAV and faster-whisper.
+    Detector calls never install or download models.
     """
     from autofa.data.artifact_speech_access import artifact_transcript as transcribe
 

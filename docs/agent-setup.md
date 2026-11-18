@@ -40,6 +40,12 @@ will be changed. Check that the import belongs to this checkout, not another ins
 Use `uv run --no-sync autofa ...` from here after synchronization. Recheck dependencies when
 the checkout's requirements change rather than reinstalling on every status request.
 
+The standard installation contains no FFmpeg or PyAV (its only codecs are Pillow's AV1 and
+WebP image codecs), and setup does not build them. Do not install PyAV from PyPI or use the removed `--extra audio`. Build them only
+when the user asks for audio/video inspection or speech transcription, following
+[audio, video and speech](artifact-dependencies.md#audio-video-and-speech). Keep `--inexact`:
+an exact `uv sync` removes the user-built PyAV and faster-whisper.
+
 The help/import checks need no model credentials or inference. Preserve `.env`, `autofa.toml`,
 `AUTOFA_CONFIG`, `AUTOFA_HOME` and saved runs; installation must not reset the user's profile.
 If downloads or execution are unavailable, state the concrete blocker and complete the
