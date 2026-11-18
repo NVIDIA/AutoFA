@@ -148,6 +148,26 @@ def test_local_refutation_does_not_require_complete_interval(tmp_path):
     assert review.validate(_verdict(review, receipt, anchor, "contradicted")) is None
 
 
+@pytest.mark.parametrize("inside", [False, True], ids=["after_boundary", "inside_interval"])
+def test_long_trace_interval_is_funded_but_supported_only_once_read(tmp_path, inside):
+    from autofa.metrics.judge_budget import MAX_TOOL_CALLS, plan_review_budget
+
+    trace = _trace()
+    trace["steps"][1 if inside else 4]["message"] = "x" * 6_000_000
+    review = _review(tmp_path, trace)
+    # The unbound interval reserves the ceiling instead of failing before dispatch.
+    plan = plan_review_budget(review)
+    assert plan.scope == "bounded_interval" and plan.tool_call_limit == MAX_TOOL_CALLS
+    receipt, anchor = _bind(review)
+    verdict = _verdict(review, receipt, anchor)
+    assert "unread interval content" in review.validate(verdict)
+    read_ranges(review, receipt["required_ranges"])
+    assert review.validate(verdict) is None
+    # Events after the frozen boundary stay unread; a long tail costs no reads.
+    assert not review.covers("response_text", 0, len(review.fields["response_text"]))
+    assert len(review.reads) < (MAX_TOOL_CALLS if inside else 8)
+
+
 @pytest.mark.parametrize("start,end,error", [
     (2, 3, "frozen run_start"),  # Cannot move the frozen start past the backup.
     (0, 3, "1-based"), (3, 1, "1-based"), (1, 9, "1-based"),
