@@ -431,6 +431,13 @@ def test_local_import_identity_and_mirrored_model_call_calls_allow_bounded_recei
     pytest.param(lambda t: _set_raw_arguments(
         t, '{"limit": NaN, "command": "ls", "command": "pwd"}'),
                  id="nonstandard_constant_with_duplicate_keys"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"limit": NaN,}'),
+                 id="identical_malformed_object"),
+    pytest.param(lambda t: _set_raw_arguments(t, '﻿ [{"a": 1, "a": 2},'),
+                 id="identical_malformed_array"),
+    pytest.param(lambda t: (t["execution"]["events"][-1].update(
+        n_tool_calls=0, metadata={"n_tool_calls": 1}), t["execution"]["tool_calls"].pop()),
+                 id="metadata_declares_calls_on_request_telemetry"),
     pytest.param(lambda t: [call.update(tool_name=name) for call, name in zip(
         t["execution"]["tool_calls"], (1, True), strict=True)], id="tool_name_type"),
     pytest.param(lambda t: _set_arguments(t, {"argv": ["ls", "-a"]}, {"argv": ["-a", "ls"]}),
