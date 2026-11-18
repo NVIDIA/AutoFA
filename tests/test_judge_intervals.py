@@ -366,10 +366,15 @@ def _set_mirror_arguments(trace, arguments):
     _mirror(trace).update(args_full=arguments, args_chars=len(arguments))
 
 
-def _set_arguments(trace, original, mirror):
-    for call, value in zip(trace["execution"]["tool_calls"], (original, mirror), strict=True):
-        text = json.dumps(value)
+def _set_raw_arguments(trace, original, mirror=None):
+    """Store argument text verbatim on the original call and its mirror (default: the same)."""
+    texts = (original, original if mirror is None else mirror)
+    for call, text in zip(trace["execution"]["tool_calls"], texts, strict=True):
         call.update(args_full=text, args_chars=len(text))
+
+
+def _set_arguments(trace, original, mirror):
+    _set_raw_arguments(trace, json.dumps(original), json.dumps(mirror))
 
 
 @pytest.mark.parametrize("mutation", [
@@ -377,6 +382,8 @@ def _set_arguments(trace, original, mirror):
     pytest.param(lambda t: _set_arguments(t, {"command": "ls", "env": {"A": "1", "B": "2"}},
                                           {"env": {"B": "2", "A": "1"}, "command": "ls"}),
                  id="reordered_members"),
+    pytest.param(lambda t: _set_raw_arguments(t, "*** Begin Patch"),
+                 id="identical_free_form_arguments"),
     pytest.param(lambda t: t["execution"]["events"][-1].update(metadata={"n_tool_calls": 1}),
                  id="metadata_count_agrees"),
 ])
@@ -402,6 +409,23 @@ def test_local_import_identity_and_mirrored_model_call_calls_allow_bounded_recei
                  id="different_arguments"),
     pytest.param(lambda t: _set_mirror_arguments(t, '{"command": "ls ✓", "command": "rm"}'),
                  id="ambiguous_arguments"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"command": "ls", "command": "pwd"}'),
+                 id="identical_duplicate_keys"),
+    pytest.param(lambda t: _set_mirror_arguments(t, '{"command": "ls ✓", "limit": 1}'),
+                 id="extra_member"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"limit": 9007199254740992.0}',
+                                              '{"limit": 9007199254740993.0}'),
+                 id="rounded_numbers"),
+    pytest.param(lambda t: _set_arguments(t, {"all": 1}, {"all": True}),
+                 id="boolean_for_number"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"t": 0.0}', '{"t": -0.0}'),
+                 id="negative_zero_float"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"t": 0}', '{"t": -0}'),
+                 id="negative_zero_int"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"t": 1e9999999999999999999}'),
+                 id="unrepresentable_number"),
+    pytest.param(lambda t: [call.update(tool_name=name) for call, name in zip(
+        t["execution"]["tool_calls"], (1, True), strict=True)], id="tool_name_type"),
     pytest.param(lambda t: _set_arguments(t, {"argv": ["ls", "-a"]}, {"argv": ["-a", "ls"]}),
                  id="reordered_array"),
     pytest.param(lambda t: _mirror(t).update(event_idx=False), id="boolean_event_id"),

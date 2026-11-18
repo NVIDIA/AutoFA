@@ -10,6 +10,7 @@ Whole boundary events are retained, including every command in a command batch.
 
 from __future__ import annotations
 
+import decimal
 import json
 import math
 from typing import Any
@@ -145,19 +146,42 @@ def _response_telemetry(event: dict) -> bool:
     return type(count) is int and count > 0 and _model_call_telemetry(event)
 
 
-def _arguments(text: str) -> str:
-    """Re-serialize decoded JSON arguments; escaping and member order are not new actions."""
-    return json.dumps(json.loads(text, object_pairs_hook=_unique_object), sort_keys=True)
+def _canonical(value: Any) -> tuple:
+    """Type-tagged form: member order is ignored; array order, types and numbers are kept."""
+    if isinstance(value, dict):
+        return ("object", tuple(sorted((key, _canonical(item)) for key, item in value.items())))
+    if isinstance(value, list):
+        return ("array", tuple(_canonical(item) for item in value))
+    if isinstance(value, decimal.Decimal):
+        # Decimal equality ignores the sign of zero; a tool reading -0.0 does not.
+        return ("Decimal", value, value.is_signed())
+    return (type(value).__name__, value)
+
+
+def _json_int(text: str) -> int | tuple:
+    """Exact integers; Python reads -0 as 0, but the token is kept distinct."""
+    return ("int", text) if text == "-0" else int(text)
+
+
+def _arguments(text: str) -> tuple:
+    """Decode JSON arguments losslessly; escaping and member order are not new actions."""
+    return _canonical(json.loads(text, object_pairs_hook=_unique_object,
+                                 parse_float=decimal.Decimal, parse_int=_json_int))
 
 
 def _mirrors(mirror: dict, original: dict) -> bool:
     left, right = mirror.get("args_full"), original.get("args_full")
-    if (_incomplete_call(mirror) or mirror.get("tool_name") != original.get("tool_name")
-            or not isinstance(left, str) or not isinstance(right, str)):
+    name, original_name = mirror.get("tool_name"), original.get("tool_name")
+    if (_incomplete_call(mirror) or type(name) is not type(original_name)
+            or name != original_name or not isinstance(left, str) or not isinstance(right, str)):
         return False
     try:
-        return left == right or _arguments(left) == _arguments(right)
-    except (ValueError, RecursionError):
+        return _arguments(left) == _arguments(right)
+    except json.JSONDecodeError:
+        # Free-form arguments are not JSON; only an exact copy repeats the call.
+        return left == right
+    except (ValueError, ArithmeticError, RecursionError):
+        # Duplicate keys, unrepresentable numbers or excessive depth: not a verified copy.
         return False
 
 
