@@ -17,7 +17,7 @@ from typing import Any
 from autofa.data.evidence_refs import expand_trace
 from autofa.data.input_view import RESPONSE_FIELDS
 from autofa.data.source_completeness import event_content_unavailable, generation_cutoff
-from autofa.data.trace_navigation import _json_children
+from autofa.data.trace_navigation import _json_children, _verified_source_identity
 
 
 def _members(text: str, start: int) -> dict:
@@ -126,18 +126,72 @@ def _incomplete_part(part: Any) -> bool:
     )
 
 
+def _model_call_telemetry(event: dict) -> bool:
+    """Importer-declared request telemetry; the lane name alone is insufficient."""
+    parts = event.get("parts")
+    return (event.get("kind") == "other" and event.get("kind_raw") == "model_call"
+            and event.get("lane_kind") == "model_call" and event.get("role") is None
+            and isinstance(parts, list) and bool(parts)
+            and all(isinstance(part, dict) and part.get("origin") == "request"
+                    for part in parts))
+
+
+def _response_telemetry(event: dict) -> bool:
+    """Model-call telemetry declaring the tool calls its response produced.
+
+    These calls must each mirror a conversation-lane call; they are never accepted alone.
+    """
+    count = event.get("n_tool_calls")
+    return type(count) is int and count > 0 and _model_call_telemetry(event)
+
+
+def _arguments(text: str) -> str:
+    """Re-serialize decoded JSON arguments; escaping differences are not new actions."""
+    return json.dumps(json.loads(text, object_pairs_hook=_unique_object))
+
+
+def _mirrors(mirror: dict, original: dict) -> bool:
+    left, right = mirror.get("args_full"), original.get("args_full")
+    if (_incomplete_call(mirror) or mirror.get("tool_name") != original.get("tool_name")
+            or not isinstance(left, str) or not isinstance(right, str)):
+        return False
+    try:
+        return left == right or _arguments(left) == _arguments(right)
+    except (ValueError, RecursionError):
+        return False
+
+
+def _check_response_mirrors(
+    declared: dict[tuple, int], mirrors: list[dict], calls: list[dict],
+) -> None:
+    """Each telemetry call must repeat exactly one distinct, uniquely identified ordered call."""
+    originals, repeated = {}, set()
+    for call in calls:
+        call_id = call.get("call_id_source")
+        if isinstance(call_id, str) and call_id:
+            if call_id in originals:
+                repeated.add(call_id)
+            originals[call_id] = call
+    matched, counts = set(), {}
+    for mirror in mirrors:
+        call_id = mirror.get("call_id_source")
+        original = originals.get(call_id) if call_id not in repeated else None
+        if original is None or call_id in matched or not _mirrors(mirror, original):
+            raise ValueError("execution actions fall outside the verified ordered steps")
+        matched.add(call_id)
+        identity = (mirror.get("lane"), mirror.get("event_idx"))
+        counts[identity] = counts.get(identity, 0) + 1
+    if any(counts.get(identity, 0) != count for identity, count in declared.items()):
+        raise ValueError("model-call tool calls disagree with their declared count")
+
+
 def _context_capture(event: dict) -> bool:
     if event.get("is_copied_context") is True:
         return True
-    parts = event.get("parts")
-    if (event.get("kind") == "other" and event.get("kind_raw") == "model_call"
-            and event.get("lane_kind") == "model_call" and event.get("role") is None
-            and not event.get("n_tool_calls") and isinstance(parts, list) and parts
-            and all(isinstance(part, dict) and part.get("origin") == "request"
-                    for part in parts)):
+    if _model_call_telemetry(event) and not event.get("n_tool_calls"):
         # Importer-declared request telemetry/context, not an assistant execution.
-        # The lane name alone is insufficient to identify these records.
         return True
+    parts = event.get("parts")
     if event.get("kind") != "other" or event.get("role") != "harness":
         return False
     if not isinstance(parts, list) or not parts:
@@ -229,8 +283,7 @@ def _navigation(snapshot: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
                                                           steps[index].get("step_id")) in cutoffs)})
     execution = expanded.get("execution")
     if execution is not None:
-        if (not isinstance(execution, dict)
-                or scope.get("source") != "original API event parts and tool arguments"
+        if (not isinstance(execution, dict) or not _verified_source_identity(scope)
                 or not isinstance(scope.get("event_lane"), str)):
             raise ValueError("execution records have no verified conversation identity")
         availability = execution.get("availability", {})
@@ -250,6 +303,8 @@ def _navigation(snapshot: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
         resources = _members(text, members["execution"][1])
         seen = set()
         original_events, call_counts, call_ids = {}, {}, set()
+        # Model-call telemetry may repeat the tool calls its response produced.
+        declared, mirrors, ordered_calls = {}, [], []
         for name in ("events", "tool_calls"):
             if name not in resources:
                 continue
@@ -261,6 +316,15 @@ def _navigation(snapshot: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
                 if name == "events" and _context_capture(record):
                     continue
                 event_id, lane = record.get("event_idx"), record.get("lane")
+                if (name == "events" and lane != scope["event_lane"]
+                        and type(event_id) is int and _response_telemetry(record)):
+                    if (lane, event_id) in declared:
+                        raise ValueError("ambiguous original event identity")
+                    declared[(lane, event_id)] = record["n_tool_calls"]
+                    continue
+                if name == "tool_calls" and (lane, event_id) in declared:
+                    mirrors.append(record)
+                    continue
                 if (lane != scope["event_lane"] or type(event_id) is not int
                         or event_id not in by_id):
                     raise ValueError("execution actions fall outside the verified ordered steps")
@@ -270,6 +334,7 @@ def _navigation(snapshot: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
                     seen.add(event_id)
                     original_events[event_id] = record
                 else:
+                    ordered_calls.append(record)
                     call_counts[event_id] = call_counts.get(event_id, 0) + 1
                     call_id = record.get("call_idx")
                     if call_id is not None:
@@ -288,6 +353,7 @@ def _navigation(snapshot: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
                     event["complete"] = False
         if seen != set(ids):
             raise ValueError("some ordered steps have no original execution event")
+        _check_response_mirrors(declared, mirrors, ordered_calls)
         for event_id, record in original_events.items():
             if _count_mismatch(record, "n_tool_calls", call_counts.get(event_id, 0)):
                 by_id[event_id]["complete"] = False

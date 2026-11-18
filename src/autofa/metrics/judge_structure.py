@@ -18,6 +18,7 @@ from typing import Any
 from autofa.data.evidence_refs import expand_trace
 from autofa.data.input_view import RESPONSE_FIELDS
 from autofa.data.source_completeness import EVENT_CONTENT_LIMITATION, TRUNCATED_EVENT_LIMITATION
+from autofa.data.trace_navigation import _verified_source_identity
 from autofa.metrics.judge_intervals import (
     _check_limitations,
     _context_capture,
@@ -98,7 +99,7 @@ def trace_structure(fields: dict[str, str], stored_fields: set[str]) -> dict | N
         mixed_lanes = (isinstance(conversation_lane, str)
                        and any(isinstance(event, dict)
                                and event.get("lane") != conversation_lane for event in events))
-        if mixed_lanes and scope.get("source") != "original API event parts and tool arguments":
+        if mixed_lanes and not _verified_source_identity(scope):
             raise ValueError("multiple execution lanes have no verified conversation identity")
         records, identities = [], set()
         assistant_messages = reasoning_events = 0

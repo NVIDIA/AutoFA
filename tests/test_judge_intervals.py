@@ -338,6 +338,86 @@ def test_request_telemetry_is_not_an_action_but_other_lane_actions_block_coverag
     assert not interval_navigation(bad)["available"]
 
 
+def _local_import_trace():
+    """Shaped like the local EvalRDL import: model calls repeat their response's tool calls."""
+    trace = _imported_trace()
+    trace["evidence_scope"].update(identity="evalrdl_tables_v1",
+                                   source="local EvalRDL event parts and tool arguments")
+    arguments = json.dumps({"command": "ls ✓"}, ensure_ascii=False)
+    call = {"event_idx": 1, "lane": "", "call_idx": 0, "call_id_source": "call-1",
+            "tool_name": "bash", "args_full": arguments, "args_chars": len(arguments)}
+    trace["execution"]["events"][1]["n_tool_calls"] = 1
+    trace["execution"]["events"].append({
+        "event_idx": 0, "lane": "model_call", "kind": "other", "role": None,
+        "lane_kind": "model_call", "kind_raw": "model_call", "n_tool_calls": 1,
+        "parts": [{"origin": "request", "text": "dialect=responses · status_code=200"}],
+    })
+    escaped = json.dumps({"command": "ls ✓"})  # The model-call capture escapes non-ASCII.
+    trace["execution"]["tool_calls"] = [call, {**call, "lane": "model_call", "event_idx": 0,
+                                               "args_full": escaped, "args_chars": len(escaped)}]
+    return trace
+
+
+def test_local_import_identity_and_mirrored_model_call_calls_allow_bounded_receipt(tmp_path):
+    review = _review(tmp_path, _local_import_trace())
+    navigation = review.interval_navigation()
+    assert navigation["available"] and navigation["event_count"] == 3
+    assert all(event["complete"] for event in navigation["events"])
+    anchor = _anchor(review)
+    receipt = review.review_interval("no_backup", 1, 2, end_citation_id=anchor)
+    assert "unread interval" in review.validate(_verdict(review, receipt, anchor))
+    read_ranges(review, receipt["required_ranges"])
+    assert review.validate(_verdict(review, receipt, anchor)) is None
+
+
+def _mirror(trace):
+    return trace["execution"]["tool_calls"][1]
+
+
+def _set_mirror_arguments(trace, arguments):
+    _mirror(trace).update(args_full=arguments, args_chars=len(arguments))
+
+
+@pytest.mark.parametrize("mutation", [
+    pytest.param(lambda t: t["evidence_scope"].pop("identity"), id="unverified_local_source"),
+    pytest.param(lambda t: _set_mirror_arguments(t, '{"command": "rm -rf /"}'),
+                 id="different_arguments"),
+    pytest.param(lambda t: _set_mirror_arguments(t, '{"command": "ls ✓", "command": "rm"}'),
+                 id="ambiguous_arguments"),
+    pytest.param(lambda t: _mirror(t).update(tool_name="python"), id="different_tool"),
+    pytest.param(lambda t: _mirror(t).update(call_id_source="call-2"), id="unknown_call_id"),
+    pytest.param(lambda t: _mirror(t).pop("call_id_source"), id="missing_call_id"),
+    pytest.param(lambda t: _mirror(t).update(truncated=True), id="truncated_mirror"),
+    pytest.param(lambda t: t["execution"]["tool_calls"].pop(), id="declared_call_missing"),
+    pytest.param(lambda t: t["execution"]["tool_calls"].append(
+        {**_mirror(t), "call_idx": 1}), id="repeated_mirror"),
+    pytest.param(lambda t: t["execution"]["tool_calls"].append(
+        {**t["execution"]["tool_calls"][0], "event_idx": 2}), id="ambiguous_original"),
+    # Each count agrees, so only the one-mirror-per-call and unique-identity checks reject.
+    pytest.param(lambda t: (
+        t["execution"]["events"].append({**t["execution"]["events"][-1], "event_idx": 1}),
+        t["execution"]["tool_calls"].append({**_mirror(t), "event_idx": 1}),
+    ), id="two_events_one_original"),
+    pytest.param(lambda t: t["execution"]["events"].append({**t["execution"]["events"][-1]}),
+                 id="duplicate_telemetry_identity"),
+    pytest.param(lambda t: t["execution"]["events"][-1].update(n_tool_calls=2),
+                 id="count_disagrees"),
+    pytest.param(lambda t: t["execution"]["events"][-1].update(role="assistant"),
+                 id="unclassified_model_call"),
+    pytest.param(lambda t: t["execution"]["events"][-1]["parts"][0].update(origin="response"),
+                 id="response_payload"),
+])
+def test_unverified_model_call_tool_calls_block_interval_coverage(tmp_path, mutation):
+    trace = _local_import_trace()
+    mutation(trace)
+    review = _review(tmp_path, trace)
+    assert review.interval_navigation()["available"] is False
+    _read_everything(review)
+    with pytest.raises(ValueError, match="verified|declared count|ambiguous original"):
+        review.review_interval("no_backup", 1, 2, end_citation_id=_anchor(review))
+    assert review.intervals == {}
+
+
 def test_unsupported_plain_text_and_conflicting_traces_fail_closed(tmp_path):
     review = _review(tmp_path, "I ran sqlite3 original.db")
     assert not review.interval_navigation()["available"]
