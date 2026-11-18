@@ -1,0 +1,112 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Failure-mode proposal
+description: Propose a new failure mode, or a change to an existing one, in the built-in taxonomy.
+title: "[Taxonomy]: "
+labels: ["taxonomy"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to propose a failure mode for the built-in taxonomy
+        (`src/autofa/taxonomy/versions/taxonomy_v1.json`, described in
+        docs/taxonomy-classification.md). A maintainer must agree to the proposal
+        before a pull request is opened; see CONTRIBUTING.md.
+        Use synthetic or redacted trace excerpts only. Omit credentials, personal
+        information, private datasets and internal service details.
+        Report suspected vulnerabilities through the private channels in SECURITY.md.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of change
+      options:
+        - New failure mode
+        - Split an existing failure mode
+        - Merge or remove failure modes
+        - Change the definition of an existing failure mode
+    validations:
+      required: true
+  - type: input
+    id: name
+    attributes:
+      label: Proposed name
+      description: Short label for the failure mode. For a change to an existing mode, give its current id or code.
+      placeholder: "e.g. Stale tool-result reuse (CTX-...)"
+    validations:
+      required: true
+  - type: dropdown
+    id: interaction
+    attributes:
+      label: Interaction the failure occurs on
+      description: The taxonomy classifies each failure on one model-to-component interaction.
+      options:
+        - Owner and model
+        - Grader and model
+        - Third party and model
+        - Context and model
+        - Memory and model
+        - Tool and model
+        - Peer and model
+        - Subagent and model
+        - External environment and model
+        - Local environment and model
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: fault_side
+    attributes:
+      label: Fault side
+      description: Which component of the interaction is at fault. The attribution rule labels the earliest failure from which execution does not recover.
+      options:
+        - Model
+        - Owner
+        - Grader
+        - Third party
+        - Context
+        - Memory
+        - Tool
+        - Peer or subagent
+        - External environment
+        - Local environment
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: definition
+    attributes:
+      label: Definition
+      description: One or two sentences, in the style of the existing definitions, that say what the agent or component does wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: Why existing modes do not fit
+      description: Name the closest existing modes and explain why the judge would misclassify or lump these failures under them.
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Evidence
+      description: |
+        Give at least two independent examples, with the benchmark or harness, a short synthetic or redacted trace excerpt,
+        and the earliest step where the failure occurs. Add an example that looks similar but should not be labelled with this mode.
+    validations:
+      required: true
+  - type: textarea
+    id: prevalence
+    attributes:
+      label: Prevalence and impact
+      description: Roughly how many failed rollouts it covers, in which models or harnesses, and how it changes the conclusions of a report. Say if you do not know.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and the current taxonomy for this failure mode.
+          required: true
+        - label: This proposal contains only information I am authorized to share.
+          required: true
