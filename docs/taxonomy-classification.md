@@ -86,6 +86,8 @@ come from the environment or AutoFA's `.env` file.
   the paper's Appendix B taxonomy. The default `taxonomy_v1.json` refines it
   using findings from AutoFA classification reports and manual analysis.
 - `--taxonomy FILE` replaces the default v1 taxonomy with a custom taxonomy.
+  To propose a change to the built-in taxonomy instead, see
+  [Proposing a failure mode](#proposing-a-failure-mode).
 - `--judge-model MODEL` overrides the model for every active LLM pass. Without
   it, LLM passes use `judge_model`. Agentic passes always keep the separate
   Judge endpoint model.
@@ -328,6 +330,25 @@ New/Continue read the judge output paths from the config. The usual
 `--judge-view`, `--group`, `--label`, and `--evidence` filters choose the
 bucket. AutoFA creates a child cohort, adds same-run successful controls, and
 then starts failure discovery.
+
+## Proposing a failure mode
+
+To suggest a new failure mode, or a split, merge or redefinition of an existing one, in the
+built-in taxonomy, open a
+[Failure-mode proposal](https://github.com/NVIDIA/AutoFA/issues/new?template=failure_mode_proposal.yml)
+issue. Maintainers agree to the proposal there before anyone opens a pull request that edits
+`taxonomy_v1.json`. A strong proposal:
+
+- names the interaction (for example *tool and model*) and the component at fault, following
+  the taxonomy's attribution rule: label the earliest failure from which execution does not
+  recover;
+- gives a definition in the style of the existing ones;
+- explains why the closest existing modes misclassify these failures;
+- includes at least two independent, synthetic or redacted trace excerpts, plus a similar
+  case that should not get the new label.
+
+To try a mode before it is accepted, copy `taxonomy_v1.json`, add your mode and pass the file
+with `--taxonomy FILE`.
 
 ## Troubleshooting
 
