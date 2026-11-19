@@ -908,8 +908,9 @@ def _evidence_tool_specs(review: EvidenceReview):
         ),
         (
             "prepare_artifact_support",
-            "Check local Office/audio/speech support. install=true installs the fixed reader "
-            "dependencies and, for speech, the tiny/base/small model. Setup is not evidence.",
+            "Check local Office/audio/speech support. Once PyAV and faster-whisper are "
+            "installed, install=true downloads the tiny/base/small speech model; office and "
+            "audio are check-only. Setup is not evidence.",
             schema({"capability": {"type": "string", "enum": ["office", "audio", "speech"]},
                     "install": {"type": "boolean"}, "model": string}, ["capability"]),
             review.prepare_artifact_support,
@@ -932,7 +933,8 @@ def _evidence_tool_specs(review: EvidenceReview):
             "view_artifact",
             "View an actual artifact page/image or 1-based video frame, with a hash receipt. "
             "Audio pages show 30-second waveform/spectrogram windows, not native listening. "
-            "A video frame does not inspect other frames or audio. ZIPs accept member_path.",
+            "A video frame does not inspect other frames or audio. Unavailable audio/video "
+            "readers or codecs are evidence gaps, not absence. ZIPs accept member_path.",
             schema({"artifact_idx": integer, "page": integer, "member_path": string},
                    ["artifact_idx"]),
             review.view_artifact,

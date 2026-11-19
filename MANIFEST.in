@@ -8,5 +8,6 @@ prune vendor
 exclude copy.bara.sky
 exclude autofa.toml
 exclude .env
+include tools/build_ffmpeg.sh
 include tools/check_dco.py
 include tools/check_license_headers.py

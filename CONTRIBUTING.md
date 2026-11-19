@@ -197,6 +197,10 @@ uv run --python 3.12 --extra dev python -m pytest -n auto
 `-n auto` runs the suite on all CPU cores with pytest-xdist; tests must not depend on
 execution order or on state left by another test. Omit it when debugging a single test.
 
+Audio and video tests need PyAV built against the FFmpeg from `tools/build_ffmpeg.sh`, as
+described in [audio, video and speech](docs/artifact-dependencies.md#audio-video-and-speech).
+Without it they are skipped; CI builds both and runs them.
+
 Install the [pre-commit hooks](#pre-commit-hooks) once per clone, so each commit runs
 the fast checks that CI runs:
 
@@ -241,7 +245,11 @@ probe; it does not authenticate to a model provider or run a live analysis.
   deliberate cache migration.
 - Avoid unrelated formatting, dependency updates, and generated artifacts. Explain
   new dependencies and any third-party material so maintainers can review their
-  provenance and required notices.
+  provenance and required notices. Do not add dependencies, tools or fixtures that
+  install or bundle FFmpeg, PyAV or audio/video codecs beyond those that
+  `tools/build_ffmpeg.sh` builds, for example PyPI PyAV wheels or faster-whisper with
+  its default PyAV wheel; test media use only that build's codecs. Pillow's AV1 and
+  WebP image codecs are reviewed in `third_party/NATIVE_BINARY_REVIEW.md`.
 
 ## Validation and review
 

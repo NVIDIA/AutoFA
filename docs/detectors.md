@@ -175,21 +175,27 @@ original formulas/cached values. Macro-bearing or externally linked documents ar
 not visually rendered. Unsupported/encrypted files, absent renderers and resource
 limits are reported explicitly, never treated as empty successful inspection.
 
-MP4/QuickTime and WebM/Matroska video inspection uses PyAV, included in the normal
-installation; system FFmpeg is not required. The manifest
+MP4/QuickTime and WebM/Matroska video inspection uses PyAV, which AutoFA does not
+install: build it against an FFmpeg on the host as described in
+[audio, video and speech](artifact-dependencies.md#audio-video-and-speech). The manifest
 reports stream metadata. `view_artifact(..., page=N)` displays the Nth decoded frame
 of the first video stream, with its exact timestamp when recorded and a verified
 frame locator. A selected frame can support a claim about its visible content;
 it does not establish motion, intervening content, other streams or audio. Video
 inspection does not issue whole-video completeness receipts. Decoding is limited
 to 30 seconds per request, 18,000 frames and 16 megapixels per decoded frame;
-unsupported media and exceeded limits remain explicit evidence gaps.
+unsupported media and exceeded limits remain explicit evidence gaps. Without PyAV, or
+when the host FFmpeg lacks the file's demuxer or decoder (with the documented build,
+H.264 and HEVC video in most MP4 and MOV files), the video is reported unavailable:
+an evidence gap, never evidence that content is absent.
 
-Missing readers can be prepared on demand with
-`prepare_artifact_support(capability="office" | "audio" | "speech", install=True)`.
-The setup tool uses fixed dependency commands; speech setup downloads an allowlisted
-local model (`tiny`, `base`, or `small`). Ordinary artifact reads and saved-evidence
-revalidation never install packages or download models. See
+Readers can be checked on demand with
+`prepare_artifact_support(capability="office" | "audio" | "speech")`. With
+`install=True`, speech setup downloads an allowlisted local model (`tiny`, `base`, or
+`small`) once PyAV and faster-whisper are installed. Office and audio setup only report
+whether LibreOffice and PyAV are available; the tool never installs LibreOffice, PyAV,
+faster-whisper or FFmpeg. Ordinary artifact reads and saved-evidence revalidation never
+install packages or download models. See
 [artifact dependency setup](artifact-dependencies.md) for platform requirements.
 
 For ZIPs, inspect the member inventory, then pass `member_path="folder/file.pdf"`
@@ -198,8 +204,10 @@ that member is extracted. Receipts bind both archive and member hashes; listing
 files does not inspect their contents. Nested, encrypted, or unsafe archives and
 resource limits remain explicit; the original archive is still downloadable.
 
-Audio inspection uses PyAV. `view_artifact(page=N)` shows the Nth 30-second mono
-waveform/spectrogram window with signal measurements. After speech setup,
+Audio inspection uses the same PyAV and is likewise reported unavailable without
+it, or without the file's demuxer or decoder (with the documented build, `.mp3` and
+`.aac` files and AAC audio in M4A files). `view_artifact(page=N)` shows the Nth
+30-second mono waveform/spectrogram window with signal measurements. After speech setup,
 `transcribe_artifact(start_seconds=0, end_seconds=30)` produces timestamped local
 speech estimates; detectors use `trace.artifact_transcript` with the same window.
 Original bytes, decoded samples, model assets and cached transcripts retain hashes.

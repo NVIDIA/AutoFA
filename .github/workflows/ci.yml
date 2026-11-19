@@ -54,6 +54,35 @@ jobs:
           echo "AUTOFA_CODEX_CLI=$harness_bin/codex" >> "$GITHUB_ENV"
           echo "AUTOFA_HOME=$RUNNER_TEMP/autofa-home" >> "$GITHUB_ENV"
 
+      # AutoFA installs no PyAV or FFmpeg. The audio and video tests use PyAV compiled against
+      # the FFmpeg that tools/build_ffmpeg.sh builds, never a PyPI wheel with bundled codecs.
+      # Later `uv run` steps keep this PyAV: they do not remove undeclared packages.
+      - name: Build FFmpeg and PyAV for the audio and video tests
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nasm pkg-config zlib1g-dev \
+            libdav1d-dev libvpx-dev libopus-dev libvorbis-dev
+          prefix="$RUNNER_TEMP/ffmpeg"
+          tools/build_ffmpeg.sh "$prefix"
+          uv sync --python 3.12 --extra dev
+          PKG_CONFIG_PATH="$prefix/lib/pkgconfig" LDFLAGS="-Wl,-rpath,$prefix/lib" \
+            uv pip install --python .venv/bin/python --no-binary av --no-cache "av==19.0.2"
+          # The documented build's codecs, exactly; review any change with the build script.
+          uv run --python 3.12 --extra dev python - <<'EOF'
+          import av
+          documented = {
+              "libdav1d", "libvpx", "libvpx-vp9", "theora", "vp3", "libopus", "libvorbis",
+              "flac", "pcm_u8", "pcm_s8", "pcm_s16le", "pcm_s16be", "pcm_s24le", "pcm_s24be",
+              "pcm_s32le", "pcm_s32be", "pcm_s64le", "pcm_f32le", "pcm_f32be", "pcm_f64le",
+              "pcm_f64be",
+          }
+          built = set(av.codecs_available)
+          print("PyAV", av.__version__, "codecs:", ", ".join(sorted(built)))
+          assert built == documented, (sorted(built - documented), sorted(documented - built))
+          EOF
+
       # Each gate runs even when an earlier one fails, so one push reports every finding.
       # See "Quality gates" in CONTRIBUTING.md for what each ratchet allows.
       - name: Ruff (full tree, including complexity)

@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Bounded local video metadata and exact frame extraction using optional PyAV.
+"""Bounded local video metadata and exact frame extraction using an optional, user-built PyAV.
 
 Run native decoding in a short-lived worker so a corrupt file cannot leave an
 unbounded parser inside discovery. Only already-verified local bytes are passed
 here; demuxing cannot open external network resources or QuickTime references.
+AutoFA installs no FFmpeg: the demuxers and decoders are those of the host's build.
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from autofa.data.artifact_dependencies import AUDIO_VIDEO_SETUP
 
 VIDEO_TIMEOUT = 30
 MAX_DECODE_FRAMES = 18_000
@@ -32,6 +35,66 @@ _VIDEO_FORMATS = {
 }
 
 
+class CodecUnavailableError(ImportError):
+    """The host's FFmpeg lacks the artifact's demuxer or decoder: a missing reader."""
+
+
+def _documented_build() -> str:
+    return (
+        "AutoFA's documented FFmpeg build reads only AV1, VP8, VP9 and Theora video and Opus, "
+        f"Vorbis, FLAC and linear PCM audio (see {AUDIO_VIDEO_SETUP})."
+    )
+
+
+def open_media(av, path: Path, demuxer: str):
+    """Open verified local bytes with local-file-only demuxer options."""
+    try:
+        # No remote URLs, playlists, or QuickTime external data references.
+        return av.open(str(path), mode="r", format=demuxer, options={
+            "protocol_whitelist": "file", "enable_drefs": "0", "use_absolute_path": "0",
+        })
+    except ValueError as exc:
+        if not str(exc).startswith("no container format"):
+            raise
+        raise CodecUnavailableError(
+            f"This host's FFmpeg has no {demuxer!r} demuxer. {_documented_build()}"
+        ) from exc
+
+
+def require_decoder(stream, kind: str) -> None:
+    """PyAV leaves codec_context unset when FFmpeg has no decoder for the stream."""
+    if stream.codec_context is None:
+        raise CodecUnavailableError(
+            f"This host's FFmpeg cannot decode the artifact's {kind} codec. {_documented_build()}"
+        )
+
+
+def run_worker_main(worker) -> None:
+    """Print a worker's JSON result; a missing reader is reported apart from other failures."""
+    try:
+        response = worker(json.load(sys.stdin))
+    except ImportError as exc:
+        # A PyAV whose FFmpeg libraries cannot load (a moved prefix, a missing run path)
+        # is a missing reader too, not a fault in the artifact.
+        message = str(exc)[:600] if isinstance(exc, CodecUnavailableError) else (
+            f"PyAV could not be loaded ({type(exc).__name__}: {str(exc)[:300]}). "
+            f"See {AUDIO_VIDEO_SETUP}"
+        )
+        print(json.dumps({"error": message, "unavailable": True}))
+        sys.exit(1)
+    except Exception as exc:
+        print(json.dumps({"error": f"{type(exc).__name__}: {str(exc)[:400]}"}))
+        sys.exit(1)
+    print(json.dumps(response))
+
+
+def worker_failure(result: dict, fallback: str) -> Exception:
+    """Rebuild a worker's failure: an unavailable reader keeps its ImportError status."""
+    if result.get("unavailable"):
+        return CodecUnavailableError(result.get("error") or fallback)
+    return ValueError(result.get("error") or fallback)
+
+
 def video_format(metadata: dict) -> str | None:
     """Support MP4/QuickTime and WebM/Matroska without enabling playlist demuxers."""
     name = str(metadata.get("name") or "")
@@ -40,18 +103,16 @@ def video_format(metadata: dict) -> str | None:
 
 
 def _worker(path: Path, demuxer: str, page: int | None, output: Path) -> dict:
-    import av
+    import av  # pyright: ignore[reportMissingImports]
 
     if demuxer not in {"mov", "matroska"}:
         raise ValueError("Unsupported video container")
-    # No remote URLs, playlists, or QuickTime external data references.
-    with av.open(str(path), mode="r", format=demuxer, options={
-        "protocol_whitelist": "file", "enable_drefs": "0", "use_absolute_path": "0",
-    }) as container:
+    with open_media(av, path, demuxer) as container:
         videos = list(container.streams.video)
         if not videos:
             raise ValueError("Artifact contains no video stream")
         stream = videos[0]
+        require_decoder(stream, "video")
         width, height = stream.codec_context.width, stream.codec_context.height
         if width <= 0 or height <= 0 or width * height > MAX_DECODE_PIXELS:
             raise ValueError("Video frame dimensions exceed the supported decode limit")
@@ -92,7 +153,10 @@ def _worker(path: Path, demuxer: str, page: int | None, output: Path) -> dict:
 def video_operation(path: Path, metadata: dict, *, page: int | None = None) -> tuple[dict, object]:
     """Return stream metadata and optionally a detached PIL image for one exact frame."""
     if importlib.util.find_spec("av") is None:
-        raise ImportError("Video frame inspection needs PyAV (av); reinstall AutoFA.")
+        raise ImportError(
+            "Video frame inspection needs PyAV built against an FFmpeg on this host; AutoFA "
+            f"does not install it. See {AUDIO_VIDEO_SETUP}"
+        )
     demuxer = video_format(metadata)
     if not demuxer:
         raise ValueError("Unsupported video container")
@@ -114,7 +178,7 @@ def video_operation(path: Path, metadata: dict, *, page: int | None = None) -> t
         except ValueError as exc:
             raise ValueError("Video worker did not return a valid inspection result") from exc
         if worker.returncode or result.get("error"):
-            raise ValueError(result.get("error") or "Video worker failed")
+            raise worker_failure(result, "Video worker failed")
         if page is None:
             return result, None
         from PIL import Image
@@ -124,11 +188,6 @@ def video_operation(path: Path, metadata: dict, *, page: int | None = None) -> t
 
 
 if __name__ == "__main__":
-    try:
-        request = json.load(sys.stdin)
-        result = _worker(Path(request["path"]), request["demuxer"], request["page"],
-                         Path(request["output"]))
-    except Exception as exc:
-        print(json.dumps({"error": f"{type(exc).__name__}: {str(exc)[:400]}"}))
-        sys.exit(1)
-    print(json.dumps(result))
+    run_worker_main(lambda request: _worker(
+        Path(request["path"]), request["demuxer"], request["page"], Path(request["output"]),
+    ))

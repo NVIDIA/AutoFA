@@ -5,6 +5,7 @@
 
 import asyncio
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
@@ -19,7 +20,6 @@ from threading import Event
 from types import SimpleNamespace
 from typing import get_type_hints
 
-import av
 import numpy as np
 import pytest
 
@@ -27,6 +27,7 @@ from autofa import trace
 from autofa.core.sandbox import run_detector
 from autofa.data import artifact_audio as audio
 from autofa.data import artifact_speech_access as speech_access
+from autofa.data import artifact_video as video
 from autofa.data.artifact_access import capture_artifact_reads, validate_artifact_reads
 from autofa.data.artifact_speech_access import artifact_transcript
 from autofa.data.artifact_store import _cache_lock as cache_lock
@@ -35,6 +36,12 @@ from autofa.metrics.judge_evidence import EvidenceReview, make_snapshot
 from autofa.util.cancellation import Cancellation, cancellation_scope
 
 from support.traces import item, serve, zip_bytes
+
+# AutoFA installs no PyAV; decoding tests need one built against FFmpeg (tools/build_ffmpeg.sh).
+requires_pyav = pytest.mark.skipif(
+    importlib.util.find_spec("av") is None,
+    reason="needs PyAV built against FFmpeg; see docs/artifact-dependencies.md",
+)
 
 
 def wav(path: Path, *, seconds=2, rate=16000, channels=1, silent=False) -> Path:
@@ -55,6 +62,7 @@ def tone(tmp_path):
     return wav(tmp_path / "tone.wav")
 
 
+@requires_pyav
 def test_metadata_has_provenance_without_decoding_or_claiming_listening(tone):
     result, image = audio.audio_operation(tone, {"name": "tone.wav"})
     assert image is None
@@ -66,6 +74,7 @@ def test_metadata_has_provenance_without_decoding_or_claiming_listening(tone):
     assert "decoded_pcm_sha256" not in result
 
 
+@requires_pyav
 def test_waveform_is_exact_window_and_hash_bound_measurement(tone):
     result, image = audio.audio_operation(tone, {"name": "tone.wav"}, page=1)
     try:
@@ -82,6 +91,7 @@ def test_waveform_is_exact_window_and_hash_bound_measurement(tone):
         image.close()
 
 
+@requires_pyav
 def test_later_window_and_stereo_resampling_do_not_duplicate_first_window(tmp_path):
     source = wav(tmp_path / "stereo.wav", seconds=31.5, rate=44100, channels=2)
     result, image = audio.audio_operation(source, {"name": "stereo.wav"}, page=2)
@@ -95,6 +105,7 @@ def test_later_window_and_stereo_resampling_do_not_duplicate_first_window(tmp_pa
         image.close()
 
 
+@requires_pyav
 def test_silence_measurements_do_not_produce_invalid_spectrogram(tmp_path):
     source = wav(tmp_path / "silence.wav", silent=True)
     result, image = audio.audio_operation(source, {"name": "silence.wav"}, page=1)
@@ -111,6 +122,7 @@ def test_bad_audio_windows_rejected_before_worker(tone, monkeypatch, page):
         audio.audio_operation(tone, {"name": "tone.wav"}, page=page)
 
 
+@requires_pyav
 def test_window_after_eof_fails(tone):
     with pytest.raises(ValueError, match="ended before"):
         audio.audio_operation(tone, {"name": "tone.wav"}, page=2)
@@ -118,18 +130,45 @@ def test_window_after_eof_fails(tone):
 
 def test_missing_audio_dependency_is_actionable(tone, monkeypatch):
     monkeypatch.setattr(audio.importlib.util, "find_spec", lambda _: None)
-    with pytest.raises(ImportError, match="PyAV"):
+    with pytest.raises(ImportError, match="PyAV") as missing:
         audio.audio_operation(tone, {"name": "tone.wav"})
+    assert audio.AUDIO_VIDEO_SETUP in str(missing.value)
     with pytest.raises(ImportError, match="prepare_artifact_support"):
         audio.transcribe_audio(tone, {"name": "tone.wav"})
+    with pytest.raises(ImportError, match="faster-whisper"):
+        audio.prepare_speech_model()
 
 
+@requires_pyav
+def test_codec_missing_from_host_ffmpeg_is_an_unavailable_reader(tone, tmp_path):
+    # An unregistered WAV format tag leaves PyAV without a decoder, as H.264 or AAC
+    # would in the documented FFmpeg build.
+    data = bytearray(tone.read_bytes())
+    data[20:22] = (0x7777).to_bytes(2, "little")
+    unknown = tmp_path / "unknown-codec.wav"
+    unknown.write_bytes(data)
+    with pytest.raises(video.CodecUnavailableError, match="cannot decode") as missing:
+        audio.audio_operation(unknown, {"name": unknown.name})
+    assert audio.AUDIO_VIDEO_SETUP in str(missing.value)
+
+
+def test_container_missing_from_host_ffmpeg_is_an_unavailable_reader(tmp_path, monkeypatch):
+    def unknown_format(path, **kwargs):
+        raise ValueError(f"no container format {kwargs['format']!r}")
+
+    monkeypatch.setitem(sys.modules, "av", SimpleNamespace(open=unknown_format))
+    with pytest.raises(video.CodecUnavailableError, match="no 'mp3' demuxer"):
+        audio._decode(tmp_path / "artifact", "mp3", None, None)
+
+
+@requires_pyav
 def test_worker_timeout_is_bounded(tone, monkeypatch):
     monkeypatch.setattr(audio, "AUDIO_TIMEOUT", 0)
     with pytest.raises(ValueError, match="0-second limit"):
         audio.audio_operation(tone, {"name": "tone.wav"})
 
 
+@requires_pyav
 def test_cancelling_audio_operation_terminates_worker_promptly(tone, monkeypatch):
     original = subprocess.Popen
     workers = []
@@ -165,7 +204,7 @@ def test_audio_decoder_never_opens_external_protocols(tmp_path, monkeypatch):
         seen.append(kwargs)
         raise ValueError("fixture finished")
 
-    monkeypatch.setattr(av, "open", reject)
+    monkeypatch.setitem(sys.modules, "av", SimpleNamespace(open=reject))
     with pytest.raises(ValueError, match="fixture finished"):
         audio._decode(tmp_path / "artifact", "wav", None, None)
     assert seen[0]["options"] == {

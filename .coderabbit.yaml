@@ -58,7 +58,7 @@ reviews:
         parallel under pytest-xdist, so they must not depend on execution order or on
         state left by another test. Live tests stay behind their opt-in environment
         variables. Prefer meaningful failure cases over tests that restate the
-        implementation.
+        implementation. Test media use only the codecs that tools/build_ffmpeg.sh builds.
     - path: ".github/workflows/**"
       instructions: >-
         Pin every action to a full commit SHA with a version comment, grant the least
@@ -68,7 +68,10 @@ reviews:
         Ratchet lists (Ruff per-file ignores, the Pyright ignore list, the coverage floor)
         may only shrink; an added entry or a lower floor needs a reason in the pull
         request. A new dependency needs its origin and license explained, and runtime
-        dependencies need THIRD_PARTY_NOTICES.md updated.
+        dependencies need THIRD_PARTY_NOTICES.md updated. Flag any dependency, tool or
+        fixture that installs or bundles FFmpeg, PyAV or audio/video codecs beyond those
+        tools/build_ffmpeg.sh builds, for example PyPI PyAV wheels or faster-whisper with
+        its default PyAV wheel. Pillow's AV1 and WebP image codecs are already reviewed.
 
 knowledge_base:
   code_guidelines:

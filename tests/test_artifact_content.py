@@ -3,21 +3,18 @@
 
 """Real documents, images and videos exercise extraction, rendering, review and dependency setup."""
 
-import asyncio
 import base64
 import hashlib
+import io
 import json
-import os
 import struct
 import subprocess
 import sys
-import threading
-import time
 import zipfile
 import zlib
 from pathlib import Path
+from types import SimpleNamespace
 
-import av
 import pytest
 from PIL import Image
 
@@ -28,7 +25,6 @@ from autofa.data import artifact_dependencies as dependencies
 from autofa.data import artifact_video as video
 from autofa.data.artifact_access import capture_artifact_reads, validate_artifact_reads
 from autofa.metrics.judge_evidence import EvidenceReview, make_snapshot
-from autofa.util.cancellation import Cancellation, cancellation_scope
 
 from support.traces import item, serve
 
@@ -175,7 +171,9 @@ def test_document_text_is_untruncated_and_missing_office_renderer_is_explicit(
     monkeypatch.setattr(content, "office_executable", lambda: None)
     rendered = render(path, tmp_path)
     assert rendered["status"] == "unavailable"
-    assert "LibreOffice" in " ".join(rendered["limitations"])
+    limitations = " ".join(rendered["limitations"])
+    assert "LibreOffice" in limitations and dependencies.OFFICE_SETUP in limitations
+    assert "install=True" not in limitations
 
 
 def test_spreadsheet_coordinates_hidden_sheet_formula_and_cached_values(tmp_path):
@@ -351,8 +349,10 @@ def test_real_pdf_text_and_page_render_have_matching_locators(tmp_path):
     assert render(path, tmp_path, page=0)["status"] == "error"
 
 
-def test_install_then_retry_view_preserves_native_text_and_restores_receipts(tmp_path, monkeypatch):
-    # Installing a missing renderer can recover the same review without losing prior reads.
+def test_reader_installed_mid_review_preserves_native_text_and_restores_receipts(
+    tmp_path, monkeypatch,
+):
+    # The user can install a missing renderer mid-review without losing prior reads.
     body = document(tmp_path / "original.docx").read_bytes()
     serve(monkeypatch, tmp_path / "home", body)
     source = item(body, name="original.docx", mime="application/octet-stream")
@@ -360,14 +360,12 @@ def test_install_then_retry_view_preserves_native_text_and_restores_receipts(tmp
 
     def office_pdf(path, kind, output):
         if not installed:
-            raise ImportError("LibreOffice unavailable; prepare_artifact_support first")
+            raise ImportError("LibreOffice unavailable")
         return pdf(output / "converted.pdf")
 
     def prepare(capability, *, install=False, model="base"):
-        nonlocal installed
-        assert capability == "office" and install
-        installed = True
-        return {"status": "available"}
+        assert capability == "office" and not install
+        return {"status": "available" if installed else "unavailable"}
 
     monkeypatch.setattr(content, "_office_pdf", office_pdf)
     monkeypatch.setattr(dependencies, "prepare_artifact_support", prepare)
@@ -378,7 +376,9 @@ def test_install_then_retry_view_preserves_native_text_and_restores_receipts(tmp
     read = review.read_artifact(2, locator)
     text_citation = review.cite_artifact(2, locator, read["text"])
     assert review.view_artifact(2)["status"] == "unavailable"
-    assert review.prepare_artifact_support("office", install=True)["status"] == "available"
+    assert review.prepare_artifact_support("office")["status"] == "unavailable"
+    installed = True  # The user installs LibreOffice outside AutoFA.
+    assert review.prepare_artifact_support("office")["status"] == "available"
     image = review.view_artifact(2)
     assert image["status"] == "available"
     image_citation = review.cite_artifact(2, image["locator"])
@@ -389,7 +389,7 @@ def test_install_then_retry_view_preserves_native_text_and_restores_receipts(tmp
     assert len(restored.artifact_accesses) == 2  # One native read and the recovered page view.
 
 
-# Optional renderers and speech models are detected and installed only on request.
+# Optional readers are only detected; a speech model is downloaded only on request.
 
 
 @pytest.fixture
@@ -439,84 +439,54 @@ def test_office_detects_standard_non_path_install(monkeypatch):
 
 
 @NO_DEPENDENCY_INSTALL
-def test_office_status_never_installs(monkeypatch):
+@pytest.mark.parametrize("install", [False, True])
+def test_office_setup_reports_but_never_installs_libreoffice(monkeypatch, install):
+    # Some distributions' LibreOffice packages also install audio and video codecs.
+    on_path(monkeypatch, "brew", "winget", "sudo", "apt-get", "dnf")
     monkeypatch.setattr(dependencies, "office_executable", lambda: None)
-    forbid(monkeypatch, dependencies, "_run_installer")
-    result = dependencies.prepare_artifact_support("office")
-    assert result["status"] == "unavailable"
-    assert "prepare_artifact_support" in result["setup"]
+    forbid(monkeypatch, subprocess, "Popen")
+    result = dependencies.prepare_artifact_support("office", install=install)
+    assert result["status"] == "unavailable" and result["executable"] is None
+    assert result["setup"] == dependencies.OFFICE_SETUP
+    assert "AUTOFA_LIBREOFFICE" in result["reason"]
+    assert "next_action" not in result and "install_command" not in result
+    assert "install=True" not in json.dumps(result)
 
 
 @NO_DEPENDENCY_INSTALL
-def test_office_installer_uses_fixed_package_and_rechecks_availability(monkeypatch):
-    available = False
-
-    def run(command, *, timeout):
-        nonlocal available
-        assert command == ["/bin/brew", "install", "--cask", "libreoffice"]
-        assert timeout == dependencies.OFFICE_INSTALL_TIMEOUT
-        available = True
-        return {"status": "installed"}
-
-    monkeypatch.setattr(dependencies.platform, "system", lambda: "Darwin")
-    on_path(monkeypatch, "brew")
-    monkeypatch.setattr(
-        dependencies, "office_executable", lambda: "/app/soffice" if available else None
-    )
-    monkeypatch.setattr(dependencies, "_run_installer", run)
-    result = dependencies.prepare_artifact_support("office", install=True)
-    assert result["status"] == "available" and result["installed"]
-    assert result["executable"] == "/app/soffice"
-
-
-@NO_DEPENDENCY_INSTALL
-def test_office_existing_install_is_not_reinstalled(monkeypatch):
+def test_office_setup_reports_an_existing_installation(monkeypatch):
     monkeypatch.setattr(dependencies, "office_executable", lambda: "/app/soffice")
-    forbid(monkeypatch, dependencies, "_run_installer")
-    assert dependencies.install_office_support()["installed"] is False
+    result = dependencies.prepare_artifact_support("office", install=True)
+    assert result["status"] == "available" and result["executable"] == "/app/soffice"
+    assert "setup" not in result and "reason" not in result
 
 
 @NO_DEPENDENCY_INSTALL
-def test_office_install_failure_does_not_claim_support(monkeypatch):
-    monkeypatch.setattr(dependencies, "office_executable", lambda: None)
-    monkeypatch.setattr(dependencies, "_office_install_command",
-                        lambda: ["/bin/brew", "install", "--cask", "libreoffice"])
-    monkeypatch.setattr(dependencies, "_run_installer",
-                        lambda *a, **k: {"status": "unavailable", "returncode": 1})
-    result = dependencies.install_office_support()
-    assert result["status"] == "unavailable" and not result["installed"]
-    assert result["installation"]["returncode"] == 1
-
-
-@NO_DEPENDENCY_INSTALL
-def test_invalid_override_does_not_install_different_executable(monkeypatch):
+def test_invalid_office_override_is_reported_not_replaced(monkeypatch):
     monkeypatch.setenv("AUTOFA_LIBREOFFICE", "/missing/soffice")
-    forbid(monkeypatch, dependencies, "_run_installer")
-    assert "does not name an executable" in dependencies.install_office_support()["reason"]
+    forbid(monkeypatch, subprocess, "Popen")
+    result = dependencies.prepare_artifact_support("office", install=True)
+    assert result["status"] == "unavailable"
+    assert "does not name an executable" in result["reason"]
 
 
 @NO_DEPENDENCY_INSTALL
-@pytest.mark.parametrize("root", [True, False])
-def test_linux_install_never_prompts_for_elevation(monkeypatch, root):
-    monkeypatch.setattr(dependencies.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(dependencies.os, "geteuid", lambda: 0 if root else 1000)
-    on_path(monkeypatch, "sudo", "apt-get")
-    prefix = [] if root else ["/bin/sudo", "-n"]
-    assert dependencies._office_install_command() == [
-        *prefix, "/bin/apt-get", "install", "-y", "libreoffice", "fonts-dejavu-core",
-    ]
-
-
-@NO_DEPENDENCY_INSTALL
-@pytest.mark.parametrize("venv", [False, True])
-def test_python_setup_targets_only_current_venv(monkeypatch, venv):
-    # Never modify a global interpreter, even when an installer is available.
-    monkeypatch.setattr(dependencies.sys, "prefix",
-                        "/test/venv" if venv else dependencies.sys.base_prefix)
-    on_path(monkeypatch, "uv")
-    package = "faster-whisper>=1.1,<2"
-    expected = ["/bin/uv", "pip", "install", "--python", sys.executable, package]
-    assert dependencies._python_install_command(package) == (expected if venv else None)
+@pytest.mark.parametrize("capability", ["audio", "speech"])
+def test_media_setup_never_installs_pyav_or_speech_packages(monkeypatch, tmp_path, capability):
+    # PyAV's PyPI wheels bundle FFmpeg codecs; the user builds PyAV and installs faster-whisper.
+    monkeypatch.setenv("AUTOFA_HOME", str(tmp_path))
+    on_path(monkeypatch, "uv", "pip", "brew", "apt-get")
+    monkeypatch.setattr(dependencies.importlib.util, "find_spec", lambda _: None)
+    forbid(monkeypatch, subprocess, "Popen")
+    forbid(monkeypatch, artifact_audio, "prepare_speech_model")
+    result = dependencies.prepare_artifact_support(capability, install=True)
+    assert result["status"] == "unavailable"
+    assert result["setup"] == dependencies.AUDIO_VIDEO_SETUP
+    assert result["missing"] == (["PyAV"] if capability == "audio"
+                                 else ["PyAV", "faster-whisper"])
+    assert "next_action" not in result and "install_command" not in result
+    # Nothing in the result invites repeating a call that cannot install the packages.
+    assert "install=True" not in json.dumps(result)
 
 
 @NO_DEPENDENCY_INSTALL
@@ -526,14 +496,14 @@ def test_python_setup_targets_only_current_venv(monkeypatch, venv):
     {"capability": "office", "install": "yes"},  # a truthy string is not consent to install
 ])
 def test_setup_rejects_unrecognized_install_requests(monkeypatch, arguments):
-    forbid(monkeypatch, dependencies, "_run_installer")
+    forbid(monkeypatch, subprocess, "Popen")
     with pytest.raises(ValueError):
         dependencies.prepare_artifact_support(**arguments)
 
 
 @NO_DEPENDENCY_INSTALL
 def test_speech_status_does_not_download_missing_model(monkeypatch):
-    monkeypatch.setattr(dependencies, "_python_support", lambda *a, **k: {"status": "available"})
+    monkeypatch.setattr(dependencies, "_media_support", lambda *a, **k: {"status": "available"})
 
     def missing(model):
         raise ImportError("model files missing")
@@ -550,7 +520,7 @@ def test_speech_status_does_not_download_missing_model(monkeypatch):
 
 @NO_DEPENDENCY_INSTALL
 def test_explicit_speech_setup_prepares_selected_model(monkeypatch):
-    monkeypatch.setattr(dependencies, "_python_support", lambda *a, **k: {"status": "available"})
+    monkeypatch.setattr(dependencies, "_media_support", lambda *a, **k: {"status": "available"})
     seen = []
 
     def prepare(model):
@@ -566,58 +536,13 @@ def test_explicit_speech_setup_prepares_selected_model(monkeypatch):
 
 @NO_DEPENDENCY_INSTALL
 def test_failed_speech_dependency_does_not_download_model(monkeypatch):
-    monkeypatch.setattr(dependencies, "_python_support", lambda *a, **k: {"status": "unavailable"})
+    monkeypatch.setattr(dependencies, "_media_support", lambda *a, **k: {
+        "status": "unavailable", "setup": dependencies.AUDIO_VIDEO_SETUP})
     forbid(monkeypatch, artifact_audio, "prepare_speech_model")
     monkeypatch.setattr(artifact_audio, "speech_model_identity",
                         lambda *a: {"status": "unavailable"})
     result = dependencies.prepare_artifact_support("speech", install=True)
     assert result["status"] == result["dependency_status"] == "unavailable"
-
-
-@NO_DEPENDENCY_INSTALL
-def test_installer_timeout_and_failure_are_bounded():
-    result = dependencies._run_installer(
-        [sys.executable, "-c", "import time; time.sleep(10)"], timeout=0.1
-    )
-    assert result["status"] == "unavailable"
-    assert "timed out" in result["reason"]
-    result = dependencies._run_installer(
-        [sys.executable, "-c", "print('x'*9000); raise SystemExit(2)"], timeout=5
-    )
-    assert result["returncode"] == 2
-    assert len(result["diagnostic"]) <= 4000
-
-
-@NO_DEPENDENCY_INSTALL
-def test_installer_cancellation_stops_work_and_terminates_descendant(tmp_path):
-    pidfile, marker = tmp_path / "child.pid", tmp_path / "should-not-exist"
-    cancellation = Cancellation()
-    timer = threading.Timer(0.5, cancellation.cancel)
-    timer.start()
-    try:
-        with cancellation_scope(cancellation), pytest.raises(asyncio.CancelledError):
-            dependencies._run_installer([
-                sys.executable, "-c",
-                "import pathlib,subprocess,sys,time; "
-                "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']); "
-                "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); time.sleep(10); "
-                "pathlib.Path(sys.argv[2]).touch()",
-                str(pidfile), str(marker),
-            ], timeout=20)
-    finally:
-        timer.join()
-    assert not marker.exists()
-    # On POSIX the subprocess group receives SIGTERM, including the otherwise orphaned child.
-    if os.name == "posix" and pidfile.exists():
-        pid = int(pidfile.read_text())
-        for _ in range(20):
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        else:
-            pytest.fail("installer child survived cancellation")
 
 
 # Reading page/notebook source does not establish inspection of its rendered output.
@@ -681,15 +606,16 @@ def test_inspection_policy_changes_only_affected_item_snapshots(monkeypatch, nam
     assert (current["snapshot_id"] != previous["snapshot_id"]) is (name != "notes.txt")
 
 
-# Real encoded frames exercise the shared artifact reader and judge receipts offline.
+# Real encoded frames exercise the shared artifact reader and judge receipts offline. They
+# need a PyAV built against FFmpeg (tools/build_ffmpeg.sh); AutoFA itself installs none.
 
 @pytest.fixture
 def movie(tmp_path):
-    path = tmp_path / "movie.mp4"
+    av = pytest.importorskip("av")
+    path = tmp_path / "movie.webm"
     with av.open(str(path), "w") as output:
-        stream = output.add_stream("mpeg4", rate=2)
+        stream = output.add_stream("libvpx-vp9", rate=2)
         stream.width, stream.height, stream.pix_fmt = 16, 16, "yuv420p"
-        stream.codec_context.max_b_frames = 0
         for color in ("red", "lime", "blue"):
             picture = Image.new("RGB", (16, 16), color)
             try:
@@ -708,7 +634,7 @@ def test_video_manifest_reports_metadata_without_claiming_content_was_reviewed(m
     assert result["status"] == "available" and result["format"] == "video"
     assert result["requires_visual_review"] and not result["visual_complete"]
     assert not result["complete"] and result["segments"] == []
-    assert result["video"]["declared_frame_count"] == 3
+    assert result["video"]["declared_frame_count"] is None  # WebM declares no frame count.
     assert result["video"]["audio_streams"] == 0
     assert result["video"]["duration_seconds"] == pytest.approx(1.5)
     assert result["sha256"] == hashlib.sha256(movie.read_bytes()).hexdigest()
@@ -719,7 +645,7 @@ def test_exact_frame_pixels_timestamp_and_original_hash(movie, tmp_path):
     assert result["status"] == "available"
     assert result["original_sha256"] == hashlib.sha256(movie.read_bytes()).hexdigest()
     assert result["locator"] == "video:stream:0/frame:2"
-    assert result["page_count"] == 3
+    assert result["page_count"] is None
     assert result["video"]["timestamp_seconds"] == pytest.approx(.5)
     assert result["temporal_complete"] is False and result["audio_complete"] is False
     with Image.open(result["path"]) as image:
@@ -732,7 +658,7 @@ def test_video_evidence_reuses_cache_and_citations_without_whole_video_confirmat
     movie, tmp_path, monkeypatch,
 ):
     provider = serve(monkeypatch, tmp_path / "cache", movie.read_bytes())
-    record = item(provider.body, name="movie.mp4", mime="video/mp4")
+    record = item(provider.body, name="movie.webm", mime="video/webm")
     with capture_artifact_reads() as receipts:
         rendered = trace.artifact_image(record, 2, page=2)
     assert rendered["status"] == "available"
@@ -758,12 +684,54 @@ def test_video_frame_bounds_fail_without_image_receipt(movie, tmp_path, page):
     assert result["status"] != "available" and "path" not in result
 
 
-def test_missing_pyav_is_an_explicit_evidence_gap(movie, tmp_path, monkeypatch):
+@pytest.mark.parametrize("name", ["movie.mp4", "speech.ogg"])
+def test_missing_pyav_is_an_explicit_evidence_gap(tmp_path, monkeypatch, name):
+    path = tmp_path / name
+    path.write_bytes(b"retained media bytes")
     monkeypatch.setattr(video.importlib.util, "find_spec", lambda _: None)
-    inspected, viewed = inspect(movie, tmp_path), render(movie, tmp_path)
+    inspected, viewed = inspect(path, tmp_path), render(path, tmp_path)
     assert inspected["status"] == viewed["status"] == "unavailable"
     assert not inspected["complete"] and "path" not in viewed
-    assert "PyAV" in " ".join(viewed["limitations"])
+    for result in (inspected, viewed):
+        limitations = " ".join(result["limitations"])
+        assert "PyAV" in limitations and dependencies.AUDIO_VIDEO_SETUP in limitations
+        assert "reinstall AutoFA" not in limitations
+
+
+def test_codec_missing_from_host_ffmpeg_is_unavailable_not_corrupt(movie, tmp_path):
+    # Renaming the WebM codec ID leaves PyAV without a decoder, as H.264 would in the
+    # documented FFmpeg build: a missing reader, not a corrupt or empty video.
+    data = movie.read_bytes()
+    assert data.count(b"V_VP9") == 1
+    unknown = tmp_path / "unknown-codec.webm"
+    unknown.write_bytes(data.replace(b"V_VP9", b"V_ZZ9"))
+    inspected, viewed = inspect(unknown, tmp_path), render(unknown, tmp_path, page=1)
+    assert inspected["status"] == viewed["status"] == "unavailable"
+    assert "path" not in viewed
+    for result in (inspected, viewed):
+        limitations = " ".join(result["limitations"])
+        assert "cannot decode the artifact's video codec" in limitations
+        assert dependencies.AUDIO_VIDEO_SETUP in limitations
+
+
+def test_pyav_that_cannot_load_is_reported_as_a_missing_reader(monkeypatch, capsys):
+    def broken_pyav(request):
+        raise ImportError("libavformat.so.63: cannot open shared object file")
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
+    with pytest.raises(SystemExit):
+        video.run_worker_main(broken_pyav)
+    result = json.loads(capsys.readouterr().out)
+    assert result["unavailable"] is True
+    assert "PyAV could not be loaded" in result["error"]
+    assert dependencies.AUDIO_VIDEO_SETUP in result["error"]
+
+
+def test_worker_reports_missing_readers_apart_from_failures():
+    unavailable = video.worker_failure({"error": "no decoder", "unavailable": True}, "fallback")
+    assert isinstance(unavailable, ImportError) and str(unavailable) == "no decoder"
+    failed = video.worker_failure({}, "Video worker failed")
+    assert type(failed) is ValueError and str(failed) == "Video worker failed"
 
 
 def test_native_video_worker_timeout_is_bounded(movie, tmp_path, monkeypatch):
@@ -779,11 +747,12 @@ def test_native_video_worker_timeout_is_bounded(movie, tmp_path, monkeypatch):
 def test_large_frames_are_rejected_before_decoding(movie, tmp_path, monkeypatch):
     monkeypatch.setattr(video, "MAX_DECODE_PIXELS", 10)
     with pytest.raises(ValueError, match="decode limit"):
-        video._worker(movie, "mov", 1, tmp_path / "not-created.png")
+        video._worker(movie, "matroska", 1, tmp_path / "not-created.png")
     assert not (tmp_path / "not-created.png").exists()
 
 
 def test_corrupt_video_and_unsupported_playlists_are_not_successful_empty_inspections(tmp_path):
+    pytest.importorskip("av")
     path = tmp_path / "bad.mp4"
     path.write_bytes(b"#EXTM3U\nhttps://example.invalid/untrusted-stream\n")
     inspected, viewed = inspect(path, tmp_path), render(path, tmp_path)
@@ -799,7 +768,7 @@ def test_video_decoder_cannot_open_external_protocols(monkeypatch, tmp_path):
         seen.append(kwargs)
         raise ValueError("fixture complete")
 
-    monkeypatch.setattr(av, "open", fail_open)
+    monkeypatch.setitem(sys.modules, "av", SimpleNamespace(open=fail_open))
     with pytest.raises(ValueError, match="fixture complete"):
         video._worker(tmp_path / "verified-bytes", "mov", None, tmp_path / "unused")
     assert seen[0]["format"] == "mov"

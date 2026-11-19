@@ -5,6 +5,8 @@
 
 The test suite runs against the source checkout with the dev extra, so it cannot see a
 module or data file the wheel leaves out, or a module that imports a dev-only package.
+The check also fails if installing the wheel brought in a package that bundles FFmpeg's
+audio/video codecs: AutoFA uses only a PyAV that the user builds.
 Run this with the interpreter of a fresh environment that has only the wheel installed,
 from the repository root, in isolated mode so the checkout's `src` is not importable:
 
@@ -16,6 +18,7 @@ from the repository root, in isolated mode so the checkout's `src` is not import
 from __future__ import annotations
 
 import importlib
+import importlib.metadata
 import os
 import pkgutil
 import subprocess
@@ -26,6 +29,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+# PyAV's PyPI wheels bundle FFmpeg with its codecs, and faster-whisper requires PyAV.
+CODEC_DISTRIBUTIONS = ("av", "faster-whisper")
+
+
+def codec_distributions(names: tuple[str, ...] = CODEC_DISTRIBUTIONS) -> list[str]:
+    """Codec-bundling distributions present in this environment, which needs none."""
+    found = []
+    for name in names:
+        try:
+            version = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        found.append(f"{name} {version} is installed; AutoFA must not depend on it")
+    return found
 
 
 def source_packages(src: Path) -> list[str]:
@@ -103,7 +120,7 @@ def main() -> int:
             return 2
         installed[package] = location
 
-    problems = []
+    problems = codec_distributions()
     for package in packages:
         problems += missing_modules(SRC / package, installed[package])
     for package, patterns in project["tool"]["setuptools"]["package-data"].items():

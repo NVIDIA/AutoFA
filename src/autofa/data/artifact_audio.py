@@ -26,6 +26,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from autofa.data.artifact_dependencies import AUDIO_VIDEO_SETUP
 from autofa.util.cancellation import cancellation_guard, check_cancelled
 
 AUDIO_TIMEOUT = 30
@@ -86,18 +87,19 @@ def _window(start: float, end: float | None) -> tuple[float, float]:
 
 
 def _decode(path: Path, demuxer: str, start: float | None, end: float | None) -> tuple:
-    import av
+    import av  # pyright: ignore[reportMissingImports]
     import numpy as np
+
+    from autofa.data.artifact_video import open_media, require_decoder
 
     if demuxer not in set(_FORMATS.values()) | {"matroska"}:
         raise ValueError("Unsupported audio container")
-    with av.open(str(path), mode="r", format=demuxer, options={
-        "protocol_whitelist": "file", "enable_drefs": "0", "use_absolute_path": "0",
-    }) as container:
+    with open_media(av, path, demuxer) as container:
         streams = list(container.streams.audio)
         if not streams:
             raise ValueError("Artifact contains no audio stream")
         stream = streams[0]
+        require_decoder(stream, "audio")
         duration = (float(stream.duration * stream.time_base)
                     if stream.duration is not None and stream.time_base is not None else
                     float(container.duration / av.time_base) if container.duration else None)
@@ -330,7 +332,9 @@ def _run(request: dict, timeout: int) -> dict:
             except ValueError as exc:
                 raise ValueError("Audio worker did not return a valid result") from exc
             if worker.returncode or result.get("error"):
-                raise ValueError(result.get("error") or "Audio worker failed")
+                from autofa.data.artifact_video import worker_failure
+
+                raise worker_failure(result, "Audio worker failed")
             return result
         finally:
             _stop_worker(worker)
@@ -338,8 +342,6 @@ def _run(request: dict, timeout: int) -> dict:
 
 def audio_operation(path: Path, metadata: dict, *, page: int | None = None) -> tuple[dict, object]:
     """Metadata or one 30-second waveform/spectrogram, using isolated native decoding."""
-    if importlib.util.find_spec("av") is None:
-        raise ImportError("Audio inspection needs PyAV (av); reinstall AutoFA.")
     demuxer = audio_format(metadata)
     if demuxer is None:
         raise ValueError("Unsupported audio container")
@@ -348,6 +350,11 @@ def audio_operation(path: Path, metadata: dict, *, page: int | None = None) -> t
         if type(page) is not int or page < 1:
             raise ValueError("Audio page must be a positive integer")
         start, end = _window((page - 1) * AUDIO_PAGE_SECONDS, page * AUDIO_PAGE_SECONDS)
+    if importlib.util.find_spec("av") is None:
+        raise ImportError(
+            "Audio inspection needs PyAV built against an FFmpeg on this host; AutoFA does not "
+            f"install it. See {AUDIO_VIDEO_SETUP}"
+        )
     with tempfile.TemporaryDirectory(prefix="autofa-audio-") as directory:
         output = Path(directory) / "waveform.png"
         result = _run({"action": "inspect", "path": str(path), "demuxer": demuxer,
@@ -366,10 +373,11 @@ def transcribe_audio(path: Path, metadata: dict, *, start_seconds: float = 0,
     """Transcribe at most 120 seconds locally, without installing or downloading anything."""
     from autofa.data.artifact_video import video_format
 
-    if importlib.util.find_spec("faster_whisper") is None:
+    if importlib.util.find_spec("av") is None or importlib.util.find_spec("faster_whisper") is None:
         raise ImportError(
-            "Speech recognition requires autofa[audio]. "
-            "Use prepare_artifact_support(capability='speech', install=True)."
+            "Speech recognition needs PyAV and faster-whisper, which AutoFA does not install "
+            f"(see {AUDIO_VIDEO_SETUP}). Then use "
+            "prepare_artifact_support(capability='speech', install=True) to download a model."
         )
     start, end = _window(start_seconds, end_seconds)
     identity = speech_model_identity(model, model_dir=model_dir)
@@ -384,8 +392,11 @@ def prepare_speech_model(model: str = "base") -> dict:
     """Explicitly download one allowlisted local speech model into the AutoFA cache."""
     check_cancelled()
     destination = _model_path(model)
-    if importlib.util.find_spec("faster_whisper") is None:
-        raise ImportError("Install autofa[audio] before downloading a local speech model")
+    if importlib.util.find_spec("av") is None or importlib.util.find_spec("faster_whisper") is None:
+        raise ImportError(
+            "Install PyAV and faster-whisper before downloading a local speech model; "
+            f"see {AUDIO_VIDEO_SETUP}"
+        )
     destination.parent.mkdir(parents=True, exist_ok=True)
     with _model_lock(destination.parent / f".{model}.lock"):
         try:
@@ -454,9 +465,6 @@ def _worker(request: dict) -> dict:
 
 
 if __name__ == "__main__":
-    try:
-        response = _worker(json.load(sys.stdin))
-    except Exception as exc:
-        print(json.dumps({"error": f"{type(exc).__name__}: {str(exc)[:400]}"}))
-        sys.exit(1)
-    print(json.dumps(response))
+    from autofa.data.artifact_video import run_worker_main
+
+    run_worker_main(_worker)
