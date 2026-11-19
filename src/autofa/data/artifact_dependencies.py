@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Find and prepare trusted local dependencies for artifact inspection.
+"""Find trusted local dependencies for artifact inspection and prepare speech models.
 
-Document bytes never select executables or installation commands. Installing a
-system dependency is explicit; ordinary reads and renders only inspect availability.
+AutoFA installs no system or Python packages: LibreOffice, PyAV and the speech
+packages are the user's own installation. Document bytes never select executables;
+only an explicit speech setup request downloads a model.
 """
 
 from __future__ import annotations
@@ -13,22 +14,21 @@ import importlib.util
 import os
 import platform
 import shutil
-import signal
-import subprocess
-import tempfile
-import threading
-import time
 from pathlib import Path
 
 from autofa.util.cancellation import check_cancelled
 
-OFFICE_INSTALL_TIMEOUT = 600
+# Some Linux distributions' LibreOffice packages also install audio and video codecs,
+# so the user installs LibreOffice with the documented commands.
+OFFICE_SETUP = (
+    "https://github.com/NVIDIA/AutoFA/blob/main/docs/artifact-dependencies.md"
+    "#office-pages-and-slides"
+)
 # Audio, video and speech need a PyAV that the user builds against their own FFmpeg.
 AUDIO_VIDEO_SETUP = (
     "https://github.com/NVIDIA/AutoFA/blob/main/docs/artifact-dependencies.md"
     "#audio-video-and-speech"
 )
-_OFFICE_INSTALL_LOCK = threading.Lock()
 _OFFICE_ENV = "AUTOFA_LIBREOFFICE"
 
 
@@ -66,146 +66,30 @@ def office_executable() -> str | None:
     )
 
 
-def _office_install_command() -> list[str] | None:
-    system = platform.system()
-    if system == "Darwin" and (brew := shutil.which("brew")):
-        return [brew, "install", "--cask", "libreoffice"]
-    if system == "Windows" and (winget := shutil.which("winget")):
-        return [
-            winget,
-            "install",
-            "--id",
-            "TheDocumentFoundation.LibreOffice",
-            "--exact",
-            "--silent",
-            "--accept-package-agreements",
-            "--accept-source-agreements",
-            "--disable-interactivity",
-        ]
-    if system == "Linux":
-        prefix: list[str] = []
-        if os.geteuid() != 0:
-            sudo = shutil.which("sudo")
-            if not sudo:
-                return None
-            # Never prompt for a password inside an agent tool.
-            prefix = [sudo, "-n"]
-        if apt := shutil.which("apt-get"):
-            return [*prefix, apt, "install", "-y", "libreoffice", "fonts-dejavu-core"]
-        if dnf := shutil.which("dnf"):
-            return [*prefix, dnf, "install", "-y", "libreoffice"]
-    return None
-
-
 def office_support_status() -> dict:
+    """Report LibreOffice, which the user installs; AutoFA never installs it."""
     executable = office_executable()
-    return {
+    result: dict = {
         "capability": "office",
         "status": "available" if executable else "unavailable",
         "executable": executable,
-        "install_command": _office_install_command() if not executable else None,
-        "setup": (
-            "LibreOffice renders DOCX, XLSX and PPTX pages. Use "
-            "prepare_artifact_support(capability='office', install=True) to install it, "
-            "or install LibreOffice with your OS package manager. "
-            "For an existing custom installation, set AUTOFA_LIBREOFFICE to the "
-            "absolute soffice executable path."
-        ),
         "limitations": [
             "Office visuals are print-layout conversions. Read native text/cells as well "
             "for hidden or non-printing content; rendered formulas may be recalculated."
         ],
     }
-
-
-def _stop_installer(process: subprocess.Popen) -> None:
-    if process.poll() is None:
-        try:
-            if os.name == "posix":
-                os.killpg(process.pid, signal.SIGTERM)
-            else:
-                process.terminate()
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            try:
-                if os.name == "posix":
-                    os.killpg(process.pid, signal.SIGKILL)
-                else:
-                    process.kill()
-            except ProcessLookupError:
-                pass
-            process.wait(timeout=5)
-
-
-def _run_installer(command: list[str], *, timeout: float) -> dict:
-    """Bound package-manager work and keep cancellation responsive."""
-    check_cancelled()
-    with tempfile.TemporaryFile() as output:
-        env = dict(os.environ, HOMEBREW_NO_AUTO_UPDATE="1", DEBIAN_FRONTEND="noninteractive")
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=output,
-            stderr=subprocess.STDOUT,
-            env=env,
-            start_new_session=os.name == "posix",
+    if not executable:
+        result.update(
+            reason=(
+                "AUTOFA_LIBREOFFICE does not name an executable file."
+                if os.environ.get(_OFFICE_ENV)
+                else "LibreOffice was not found. AutoFA does not install it; install it "
+                "as described in the setup guide, or set AUTOFA_LIBREOFFICE to the "
+                "absolute soffice path of an existing installation."
+            ),
+            setup=OFFICE_SETUP,
         )
-        deadline = time.monotonic() + timeout
-        try:
-            while process.poll() is None:
-                check_cancelled()
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    _stop_installer(process)
-                    return {"status": "unavailable", "reason": "Dependency installation timed out."}
-                try:
-                    process.wait(timeout=min(0.25, remaining))
-                except subprocess.TimeoutExpired:
-                    pass
-            check_cancelled()
-            output.seek(0, os.SEEK_END)
-            output.seek(max(0, output.tell() - 4000))
-            return {
-                "status": "installed" if process.returncode == 0 else "unavailable",
-                "returncode": process.returncode,
-                "diagnostic": output.read().decode("utf-8", errors="replace").strip(),
-            }
-        finally:
-            _stop_installer(process)
-
-
-def install_office_support() -> dict:
-    """Install the fixed LibreOffice package when explicitly requested by a tool."""
-    check_cancelled()
-    while not _OFFICE_INSTALL_LOCK.acquire(timeout=0.25):
-        check_cancelled()
-    try:
-        check_cancelled()
-        status = office_support_status()
-        if status["status"] == "available":
-            return dict(status, installed=False)
-        if os.environ.get(_OFFICE_ENV):
-            return dict(status, reason="AUTOFA_LIBREOFFICE does not name an executable file.")
-        command = status["install_command"]
-        if not command:
-            return dict(status, reason="No supported noninteractive package manager is available.")
-        try:
-            installation = _run_installer(command, timeout=OFFICE_INSTALL_TIMEOUT)
-        except OSError as exc:
-            installation = {"status": "unavailable", "reason": str(exc)}
-        result = office_support_status()
-        result.update(installed=result["status"] == "available", installation=installation)
-        if result["status"] != "available":
-            result["reason"] = (
-                "LibreOffice is still unavailable. Inspect installation diagnostics; "
-                "the host may require an administrator to install it."
-            )
-        return result
-    finally:
-        _OFFICE_INSTALL_LOCK.release()
+    return result
 
 
 def _media_support(capability: str) -> dict:
@@ -240,9 +124,9 @@ def prepare_artifact_support(
     install: bool = False,
     model: str = "base",
 ) -> dict:
-    """Inspect dependencies, or explicitly prepare a fixed supported capability.
+    """Inspect dependencies, or explicitly download a fixed speech model.
 
-    Office installs LibreOffice. Audio only reports the user-built PyAV; speech can
+    Office and audio only report LibreOffice and the user-built PyAV. Speech can
     download a local model once the user has installed PyAV and faster-whisper.
     """
     check_cancelled()
@@ -251,7 +135,7 @@ def prepare_artifact_support(
     if type(install) is not bool:
         raise ValueError("install must be a boolean.")
     if capability == "office":
-        return install_office_support() if install else office_support_status()
+        return office_support_status()
     if capability == "speech" and model not in {"tiny", "base", "small"}:
         raise ValueError("model must be 'tiny', 'base', or 'small'.")
     result = _media_support(capability)
@@ -279,7 +163,7 @@ def prepare_artifact_support(
             "Speech transcripts are machine-generated evidence and can be wrong. "
             "Music, sound effects and speaker identity are not assessed."
         ]
-    # Only LibreOffice and a speech model can be prepared here; packages are the user's.
+    # Only a speech model can be prepared here; packages and LibreOffice are the user's.
     if result["status"] != "available" and "setup" not in result:
         result["next_action"] = {
             "tool": "prepare_artifact_support",

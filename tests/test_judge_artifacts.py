@@ -9,8 +9,8 @@ import hashlib
 import io
 import json
 import random
-import sys
 import threading
+import time
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,7 +19,7 @@ import pytest
 
 from autofa import trace
 from autofa.core.localisation import passage, text_hash
-from autofa.data import artifact_content, artifact_dependencies, artifact_store, inline_images
+from autofa.data import artifact_content, artifact_store, inline_images
 from autofa.data.artifact_access import capture_artifact_reads, validate_artifact_reads
 from autofa.data.artifact_store import ArtifactStore, ensure_artifact
 from autofa.mcp import tools_artifacts
@@ -1031,11 +1031,12 @@ def test_async_evidence_installer_leaves_event_loop_responsive_and_cancels():
     finished = threading.Event()
 
     def install():
+        # A long setup step, such as a speech model download, polls for cancellation.
         started.set()
         try:
-            return artifact_dependencies._run_installer(
-                [sys.executable, "-c", "import time; time.sleep(60)"], timeout=90,
-            )
+            for _ in range(6000):
+                check_cancelled()
+                time.sleep(0.01)
         finally:
             finished.set()
 

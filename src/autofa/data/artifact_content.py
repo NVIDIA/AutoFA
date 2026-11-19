@@ -28,7 +28,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from autofa.data.artifact_dependencies import office_executable
+from autofa.data.artifact_dependencies import OFFICE_SETUP, office_executable
 
 ARTIFACT_TRANSFORM_VERSION = "artifact-content-v1"
 MAX_FILE_BYTES = 256 * 1024**2
@@ -675,9 +675,10 @@ def _office_pdf(path: Path, kind: str, output_dir: Path) -> Path:
     executable = office_executable()
     if not executable:
         raise ImportError(
-            "LibreOffice is required for office document visual rendering. Use "
-            "prepare_artifact_support(capability='office', install=True), or install "
-            "LibreOffice and set AUTOFA_LIBREOFFICE to its soffice executable."
+            "LibreOffice is required for office document visual rendering. AutoFA does not "
+            f"install it; install it as described in {OFFICE_SETUP}, or set "
+            "AUTOFA_LIBREOFFICE to the absolute path of the soffice executable of an existing "
+            "installation."
         )
     # Reject encrypted/oversized archives before an external renderer sees them.
     package = _Package(path)

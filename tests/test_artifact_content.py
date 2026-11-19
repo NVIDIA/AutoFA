@@ -3,17 +3,13 @@
 
 """Real documents, images and videos exercise extraction, rendering, review and dependency setup."""
 
-import asyncio
 import base64
 import hashlib
 import io
 import json
-import os
 import struct
 import subprocess
 import sys
-import threading
-import time
 import zipfile
 import zlib
 from pathlib import Path
@@ -29,7 +25,6 @@ from autofa.data import artifact_dependencies as dependencies
 from autofa.data import artifact_video as video
 from autofa.data.artifact_access import capture_artifact_reads, validate_artifact_reads
 from autofa.metrics.judge_evidence import EvidenceReview, make_snapshot
-from autofa.util.cancellation import Cancellation, cancellation_scope
 
 from support.traces import item, serve
 
@@ -176,7 +171,9 @@ def test_document_text_is_untruncated_and_missing_office_renderer_is_explicit(
     monkeypatch.setattr(content, "office_executable", lambda: None)
     rendered = render(path, tmp_path)
     assert rendered["status"] == "unavailable"
-    assert "LibreOffice" in " ".join(rendered["limitations"])
+    limitations = " ".join(rendered["limitations"])
+    assert "LibreOffice" in limitations and dependencies.OFFICE_SETUP in limitations
+    assert "install=True" not in limitations
 
 
 def test_spreadsheet_coordinates_hidden_sheet_formula_and_cached_values(tmp_path):
@@ -352,8 +349,10 @@ def test_real_pdf_text_and_page_render_have_matching_locators(tmp_path):
     assert render(path, tmp_path, page=0)["status"] == "error"
 
 
-def test_install_then_retry_view_preserves_native_text_and_restores_receipts(tmp_path, monkeypatch):
-    # Installing a missing renderer can recover the same review without losing prior reads.
+def test_reader_installed_mid_review_preserves_native_text_and_restores_receipts(
+    tmp_path, monkeypatch,
+):
+    # The user can install a missing renderer mid-review without losing prior reads.
     body = document(tmp_path / "original.docx").read_bytes()
     serve(monkeypatch, tmp_path / "home", body)
     source = item(body, name="original.docx", mime="application/octet-stream")
@@ -361,14 +360,12 @@ def test_install_then_retry_view_preserves_native_text_and_restores_receipts(tmp
 
     def office_pdf(path, kind, output):
         if not installed:
-            raise ImportError("LibreOffice unavailable; prepare_artifact_support first")
+            raise ImportError("LibreOffice unavailable")
         return pdf(output / "converted.pdf")
 
     def prepare(capability, *, install=False, model="base"):
-        nonlocal installed
-        assert capability == "office" and install
-        installed = True
-        return {"status": "available"}
+        assert capability == "office" and not install
+        return {"status": "available" if installed else "unavailable"}
 
     monkeypatch.setattr(content, "_office_pdf", office_pdf)
     monkeypatch.setattr(dependencies, "prepare_artifact_support", prepare)
@@ -379,7 +376,9 @@ def test_install_then_retry_view_preserves_native_text_and_restores_receipts(tmp
     read = review.read_artifact(2, locator)
     text_citation = review.cite_artifact(2, locator, read["text"])
     assert review.view_artifact(2)["status"] == "unavailable"
-    assert review.prepare_artifact_support("office", install=True)["status"] == "available"
+    assert review.prepare_artifact_support("office")["status"] == "unavailable"
+    installed = True  # The user installs LibreOffice outside AutoFA.
+    assert review.prepare_artifact_support("office")["status"] == "available"
     image = review.view_artifact(2)
     assert image["status"] == "available"
     image_citation = review.cite_artifact(2, image["locator"])
@@ -390,7 +389,7 @@ def test_install_then_retry_view_preserves_native_text_and_restores_receipts(tmp
     assert len(restored.artifact_accesses) == 2  # One native read and the recovered page view.
 
 
-# Optional renderers and speech models are detected and installed only on request.
+# Optional readers are only detected; a speech model is downloaded only on request.
 
 
 @pytest.fixture
@@ -440,72 +439,35 @@ def test_office_detects_standard_non_path_install(monkeypatch):
 
 
 @NO_DEPENDENCY_INSTALL
-def test_office_status_never_installs(monkeypatch):
+@pytest.mark.parametrize("install", [False, True])
+def test_office_setup_reports_but_never_installs_libreoffice(monkeypatch, install):
+    # Some distributions' LibreOffice packages also install audio and video codecs.
+    on_path(monkeypatch, "brew", "winget", "sudo", "apt-get", "dnf")
     monkeypatch.setattr(dependencies, "office_executable", lambda: None)
-    forbid(monkeypatch, dependencies, "_run_installer")
-    result = dependencies.prepare_artifact_support("office")
-    assert result["status"] == "unavailable"
-    assert "prepare_artifact_support" in result["setup"]
+    forbid(monkeypatch, subprocess, "Popen")
+    result = dependencies.prepare_artifact_support("office", install=install)
+    assert result["status"] == "unavailable" and result["executable"] is None
+    assert result["setup"] == dependencies.OFFICE_SETUP
+    assert "AUTOFA_LIBREOFFICE" in result["reason"]
+    assert "next_action" not in result and "install_command" not in result
+    assert "install=True" not in json.dumps(result)
 
 
 @NO_DEPENDENCY_INSTALL
-def test_office_installer_uses_fixed_package_and_rechecks_availability(monkeypatch):
-    available = False
-
-    def run(command, *, timeout):
-        nonlocal available
-        assert command == ["/bin/brew", "install", "--cask", "libreoffice"]
-        assert timeout == dependencies.OFFICE_INSTALL_TIMEOUT
-        available = True
-        return {"status": "installed"}
-
-    monkeypatch.setattr(dependencies.platform, "system", lambda: "Darwin")
-    on_path(monkeypatch, "brew")
-    monkeypatch.setattr(
-        dependencies, "office_executable", lambda: "/app/soffice" if available else None
-    )
-    monkeypatch.setattr(dependencies, "_run_installer", run)
-    result = dependencies.prepare_artifact_support("office", install=True)
-    assert result["status"] == "available" and result["installed"]
-    assert result["executable"] == "/app/soffice"
-
-
-@NO_DEPENDENCY_INSTALL
-def test_office_existing_install_is_not_reinstalled(monkeypatch):
+def test_office_setup_reports_an_existing_installation(monkeypatch):
     monkeypatch.setattr(dependencies, "office_executable", lambda: "/app/soffice")
-    forbid(monkeypatch, dependencies, "_run_installer")
-    assert dependencies.install_office_support()["installed"] is False
+    result = dependencies.prepare_artifact_support("office", install=True)
+    assert result["status"] == "available" and result["executable"] == "/app/soffice"
+    assert "setup" not in result and "reason" not in result
 
 
 @NO_DEPENDENCY_INSTALL
-def test_office_install_failure_does_not_claim_support(monkeypatch):
-    monkeypatch.setattr(dependencies, "office_executable", lambda: None)
-    monkeypatch.setattr(dependencies, "_office_install_command",
-                        lambda: ["/bin/brew", "install", "--cask", "libreoffice"])
-    monkeypatch.setattr(dependencies, "_run_installer",
-                        lambda *a, **k: {"status": "unavailable", "returncode": 1})
-    result = dependencies.install_office_support()
-    assert result["status"] == "unavailable" and not result["installed"]
-    assert result["installation"]["returncode"] == 1
-
-
-@NO_DEPENDENCY_INSTALL
-def test_invalid_override_does_not_install_different_executable(monkeypatch):
+def test_invalid_office_override_is_reported_not_replaced(monkeypatch):
     monkeypatch.setenv("AUTOFA_LIBREOFFICE", "/missing/soffice")
-    forbid(monkeypatch, dependencies, "_run_installer")
-    assert "does not name an executable" in dependencies.install_office_support()["reason"]
-
-
-@NO_DEPENDENCY_INSTALL
-@pytest.mark.parametrize("root", [True, False])
-def test_linux_install_never_prompts_for_elevation(monkeypatch, root):
-    monkeypatch.setattr(dependencies.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(dependencies.os, "geteuid", lambda: 0 if root else 1000)
-    on_path(monkeypatch, "sudo", "apt-get")
-    prefix = [] if root else ["/bin/sudo", "-n"]
-    assert dependencies._office_install_command() == [
-        *prefix, "/bin/apt-get", "install", "-y", "libreoffice", "fonts-dejavu-core",
-    ]
+    forbid(monkeypatch, subprocess, "Popen")
+    result = dependencies.prepare_artifact_support("office", install=True)
+    assert result["status"] == "unavailable"
+    assert "does not name an executable" in result["reason"]
 
 
 @NO_DEPENDENCY_INSTALL
@@ -515,7 +477,7 @@ def test_media_setup_never_installs_pyav_or_speech_packages(monkeypatch, tmp_pat
     monkeypatch.setenv("AUTOFA_HOME", str(tmp_path))
     on_path(monkeypatch, "uv", "pip", "brew", "apt-get")
     monkeypatch.setattr(dependencies.importlib.util, "find_spec", lambda _: None)
-    forbid(monkeypatch, dependencies, "_run_installer")
+    forbid(monkeypatch, subprocess, "Popen")
     forbid(monkeypatch, artifact_audio, "prepare_speech_model")
     result = dependencies.prepare_artifact_support(capability, install=True)
     assert result["status"] == "unavailable"
@@ -534,7 +496,7 @@ def test_media_setup_never_installs_pyav_or_speech_packages(monkeypatch, tmp_pat
     {"capability": "office", "install": "yes"},  # a truthy string is not consent to install
 ])
 def test_setup_rejects_unrecognized_install_requests(monkeypatch, arguments):
-    forbid(monkeypatch, dependencies, "_run_installer")
+    forbid(monkeypatch, subprocess, "Popen")
     with pytest.raises(ValueError):
         dependencies.prepare_artifact_support(**arguments)
 
@@ -581,52 +543,6 @@ def test_failed_speech_dependency_does_not_download_model(monkeypatch):
                         lambda *a: {"status": "unavailable"})
     result = dependencies.prepare_artifact_support("speech", install=True)
     assert result["status"] == result["dependency_status"] == "unavailable"
-
-
-@NO_DEPENDENCY_INSTALL
-def test_installer_timeout_and_failure_are_bounded():
-    result = dependencies._run_installer(
-        [sys.executable, "-c", "import time; time.sleep(10)"], timeout=0.1
-    )
-    assert result["status"] == "unavailable"
-    assert "timed out" in result["reason"]
-    result = dependencies._run_installer(
-        [sys.executable, "-c", "print('x'*9000); raise SystemExit(2)"], timeout=5
-    )
-    assert result["returncode"] == 2
-    assert len(result["diagnostic"]) <= 4000
-
-
-@NO_DEPENDENCY_INSTALL
-def test_installer_cancellation_stops_work_and_terminates_descendant(tmp_path):
-    pidfile, marker = tmp_path / "child.pid", tmp_path / "should-not-exist"
-    cancellation = Cancellation()
-    timer = threading.Timer(0.5, cancellation.cancel)
-    timer.start()
-    try:
-        with cancellation_scope(cancellation), pytest.raises(asyncio.CancelledError):
-            dependencies._run_installer([
-                sys.executable, "-c",
-                "import pathlib,subprocess,sys,time; "
-                "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']); "
-                "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); time.sleep(10); "
-                "pathlib.Path(sys.argv[2]).touch()",
-                str(pidfile), str(marker),
-            ], timeout=20)
-    finally:
-        timer.join()
-    assert not marker.exists()
-    # On POSIX the subprocess group receives SIGTERM, including the otherwise orphaned child.
-    if os.name == "posix" and pidfile.exists():
-        pid = int(pidfile.read_text())
-        for _ in range(20):
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        else:
-            pytest.fail("installer child survived cancellation")
 
 
 # Reading page/notebook source does not establish inspection of its rendered output.

@@ -908,9 +908,9 @@ def _evidence_tool_specs(review: EvidenceReview):
         ),
         (
             "prepare_artifact_support",
-            "Check local Office/audio/speech support. install=true installs LibreOffice for "
-            "office and, once PyAV and faster-whisper are installed, downloads the "
-            "tiny/base/small speech model; audio is check-only. Setup is not evidence.",
+            "Check local Office/audio/speech support. Once PyAV and faster-whisper are "
+            "installed, install=true downloads the tiny/base/small speech model; office and "
+            "audio are check-only. Setup is not evidence.",
             schema({"capability": {"type": "string", "enum": ["office", "audio", "speech"]},
                     "install": {"type": "boolean"}, "model": string}, ["capability"]),
             review.prepare_artifact_support,

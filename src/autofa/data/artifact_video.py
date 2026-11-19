@@ -39,10 +39,10 @@ class CodecUnavailableError(ImportError):
     """The host's FFmpeg lacks the artifact's demuxer or decoder: a missing reader."""
 
 
-def _rebuild_hint() -> str:
+def _documented_build() -> str:
     return (
         "AutoFA's documented FFmpeg build reads only AV1, VP8, VP9 and Theora video and Opus, "
-        f"Vorbis, FLAC and linear PCM audio; to add codecs, see {AUDIO_VIDEO_SETUP}"
+        f"Vorbis, FLAC and linear PCM audio (see {AUDIO_VIDEO_SETUP})."
     )
 
 
@@ -57,7 +57,7 @@ def open_media(av, path: Path, demuxer: str):
         if not str(exc).startswith("no container format"):
             raise
         raise CodecUnavailableError(
-            f"This host's FFmpeg has no {demuxer!r} demuxer. {_rebuild_hint()}"
+            f"This host's FFmpeg has no {demuxer!r} demuxer. {_documented_build()}"
         ) from exc
 
 
@@ -65,7 +65,7 @@ def require_decoder(stream, kind: str) -> None:
     """PyAV leaves codec_context unset when FFmpeg has no decoder for the stream."""
     if stream.codec_context is None:
         raise CodecUnavailableError(
-            f"This host's FFmpeg cannot decode the artifact's {kind} codec. {_rebuild_hint()}"
+            f"This host's FFmpeg cannot decode the artifact's {kind} codec. {_documented_build()}"
         )
 
 

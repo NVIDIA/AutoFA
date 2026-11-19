@@ -423,8 +423,8 @@ not necessarily tools available to this discovery session.
    retain downloadable original bytes, but do not count as inspected evidence. An
    unavailable audio/video reader or codec is likewise an evidence gap, not absence.
    Check readers with `prepare_artifact_support(capability='office'|'audio'|'speech')`.
-   With `install=True`, office installs LibreOffice and speech downloads the selected local
-   model once the user has installed PyAV and faster-whisper; audio only checks for PyAV.
+   With `install=True`, speech downloads the selected local model once the user has
+   installed PyAV and faster-whisper; office and audio only check for LibreOffice and PyAV.
    ZIP files expose a member inventory; select `member_path` in download/read/view/transcribe
    tools instead of unpacking every file.
    Audio pages show 30-second signal plots. `transcribe_artifact` returns a timestamped

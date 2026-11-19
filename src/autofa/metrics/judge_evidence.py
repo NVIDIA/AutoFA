@@ -1774,11 +1774,10 @@ class EvidenceReview:
         if self._artifact_catalog():
             manifest["instructions"] += (
                 " Check readers with prepare_artifact_support "
-                "(capability='office'|'audio'|'speech'). install=True installs LibreOffice for "
-                "office and, once PyAV and faster-whisper are installed, downloads the selected "
-                "local speech model; audio is check-only. Evidence reads never download models "
-                "automatically. Unavailable audio/video readers or codecs are evidence gaps, "
-                "not absence. "
+                "(capability='office'|'audio'|'speech'). Once PyAV and faster-whisper are "
+                "installed, install=True downloads the selected local speech model; office and "
+                "audio are check-only. Evidence reads never download models automatically. "
+                "Unavailable readers or codecs are evidence gaps, not absence. "
                 "For ZIP files, inspect the member inventory, then use member_path with the "
                 "read/view/transcribe/cite tools. An archive listing is not member inspection. "
                 "Audio views are 30-second waveform/spectrogram measurements, not listening. "

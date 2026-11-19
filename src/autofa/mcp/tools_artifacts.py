@@ -109,9 +109,9 @@ def prepare_artifact_support(
 ) -> dict[str, Any]:
     """Check/prepare supported artifact readers on demand: office, audio, or speech.
 
-    install=True installs LibreOffice for office. Audio only checks for the user-built PyAV.
-    Speech checks for PyAV and faster-whisper and, with install=True, downloads the selected
-    tiny/base/small local model; it never installs Python packages.
+    Office and audio only check for LibreOffice and the user-built PyAV; AutoFA installs
+    neither. Speech checks for PyAV and faster-whisper and, with install=True, downloads the
+    selected tiny/base/small local model; it never installs packages.
     Does not accept arbitrary packages, URLs or shell commands.
     Files are processed locally; no artifact content is sent to a transcription API.
     """
