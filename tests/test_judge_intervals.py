@@ -148,6 +148,26 @@ def test_local_refutation_does_not_require_complete_interval(tmp_path):
     assert review.validate(_verdict(review, receipt, anchor, "contradicted")) is None
 
 
+@pytest.mark.parametrize("inside", [False, True], ids=["after_boundary", "inside_interval"])
+def test_long_trace_interval_is_funded_but_supported_only_once_read(tmp_path, inside):
+    from autofa.metrics.judge_budget import MAX_TOOL_CALLS, plan_review_budget
+
+    trace = _trace()
+    trace["steps"][1 if inside else 4]["message"] = "x" * 6_000_000
+    review = _review(tmp_path, trace)
+    # The unbound interval reserves the ceiling instead of failing before dispatch.
+    plan = plan_review_budget(review)
+    assert plan.scope == "bounded_interval" and plan.tool_call_limit == MAX_TOOL_CALLS
+    receipt, anchor = _bind(review)
+    verdict = _verdict(review, receipt, anchor)
+    assert "unread interval content" in review.validate(verdict)
+    read_ranges(review, receipt["required_ranges"])
+    assert review.validate(verdict) is None
+    # Events after the frozen boundary stay unread; a long tail costs no reads.
+    assert not review.covers("response_text", 0, len(review.fields["response_text"]))
+    assert len(review.reads) < (MAX_TOOL_CALLS if inside else 8)
+
+
 @pytest.mark.parametrize("start,end,error", [
     (2, 3, "frozen run_start"),  # Cannot move the frozen start past the backup.
     (0, 3, "1-based"), (3, 1, "1-based"), (1, 9, "1-based"),
@@ -316,6 +336,147 @@ def test_request_telemetry_is_not_an_action_but_other_lane_actions_block_coverag
     blob["execution"]["events"][-1].update(role="assistant", kind="message")
     bad["fields"]["response_text"] = json.dumps(blob)
     assert not interval_navigation(bad)["available"]
+
+
+def _local_import_trace():
+    """Shaped like the local EvalRDL import: model calls repeat their response's tool calls."""
+    trace = _imported_trace()
+    trace["evidence_scope"].update(identity="evalrdl_tables_v1",
+                                   source="local EvalRDL event parts and tool arguments")
+    arguments = json.dumps({"command": "ls ✓"}, ensure_ascii=False)
+    call = {"event_idx": 1, "lane": "", "call_idx": 0, "call_id_source": "call-1",
+            "tool_name": "bash", "args_full": arguments, "args_chars": len(arguments)}
+    trace["execution"]["events"][1]["n_tool_calls"] = 1
+    trace["execution"]["events"].append({
+        "event_idx": 0, "lane": "model_call", "kind": "other", "role": None,
+        "lane_kind": "model_call", "kind_raw": "model_call", "n_tool_calls": 1,
+        "parts": [{"origin": "request", "text": "dialect=responses · status_code=200"}],
+    })
+    escaped = json.dumps({"command": "ls ✓"})  # The model-call capture escapes non-ASCII.
+    trace["execution"]["tool_calls"] = [call, {**call, "lane": "model_call", "event_idx": 0,
+                                               "args_full": escaped, "args_chars": len(escaped)}]
+    return trace
+
+
+def _mirror(trace):
+    return trace["execution"]["tool_calls"][1]
+
+
+def _set_mirror_arguments(trace, arguments):
+    _mirror(trace).update(args_full=arguments, args_chars=len(arguments))
+
+
+def _set_raw_arguments(trace, original, mirror=None):
+    """Store argument text verbatim on the original call and its mirror (default: the same)."""
+    texts = (original, original if mirror is None else mirror)
+    for call, text in zip(trace["execution"]["tool_calls"], texts, strict=True):
+        call.update(args_full=text, args_chars=len(text))
+
+
+def _set_arguments(trace, original, mirror):
+    _set_raw_arguments(trace, json.dumps(original), json.dumps(mirror))
+
+
+@pytest.mark.parametrize("mutation", [
+    pytest.param(lambda t: None, id="as_imported"),
+    pytest.param(lambda t: _set_arguments(t, {"command": "ls", "env": {"A": "1", "B": "2"}},
+                                          {"env": {"B": "2", "A": "1"}, "command": "ls"}),
+                 id="reordered_members"),
+    pytest.param(lambda t: _set_raw_arguments(t, "*** Begin Patch"),
+                 id="identical_free_form_arguments"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"limit": NaN}'),
+                 id="identical_nonstandard_constant"),
+    pytest.param(lambda t: t["execution"]["events"][-1].update(metadata={"n_tool_calls": 1}),
+                 id="metadata_count_agrees"),
+])
+def test_local_import_identity_and_mirrored_model_call_calls_allow_bounded_receipt(
+    tmp_path, mutation,
+):
+    trace = _local_import_trace()
+    mutation(trace)
+    review = _review(tmp_path, trace)
+    navigation = review.interval_navigation()
+    assert navigation["available"] and navigation["event_count"] == 3
+    assert all(event["complete"] for event in navigation["events"])
+    anchor = _anchor(review)
+    receipt = review.review_interval("no_backup", 1, 2, end_citation_id=anchor)
+    assert "unread interval" in review.validate(_verdict(review, receipt, anchor))
+    read_ranges(review, receipt["required_ranges"])
+    assert review.validate(_verdict(review, receipt, anchor)) is None
+
+
+@pytest.mark.parametrize("mutation", [
+    pytest.param(lambda t: t["evidence_scope"].pop("identity"), id="unverified_local_source"),
+    pytest.param(lambda t: _set_mirror_arguments(t, '{"command": "rm -rf /"}'),
+                 id="different_arguments"),
+    pytest.param(lambda t: _set_mirror_arguments(t, '{"command": "ls ✓", "command": "rm"}'),
+                 id="ambiguous_arguments"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"command": "ls", "command": "pwd"}'),
+                 id="identical_duplicate_keys"),
+    pytest.param(lambda t: _set_mirror_arguments(t, '{"command": "ls ✓", "limit": 1}'),
+                 id="extra_member"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"limit": 9007199254740992.0}',
+                                              '{"limit": 9007199254740993.0}'),
+                 id="rounded_numbers"),
+    pytest.param(lambda t: _set_arguments(t, {"all": 1}, {"all": True}),
+                 id="boolean_for_number"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"t": 0.0}', '{"t": -0.0}'),
+                 id="negative_zero_float"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"t": 0}', '{"t": -0}'),
+                 id="negative_zero_int"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"t": 1e9999999999999999999}'),
+                 id="unrepresentable_number"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"limit":Infinity}', '{ "limit": Infinity }'),
+                 id="nonstandard_constant"),
+    pytest.param(lambda t: _set_raw_arguments(
+        t, '{"limit": NaN, "command": "ls", "command": "pwd"}'),
+                 id="nonstandard_constant_with_duplicate_keys"),
+    pytest.param(lambda t: _set_raw_arguments(t, '{"limit": NaN,}'),
+                 id="identical_malformed_object"),
+    pytest.param(lambda t: _set_raw_arguments(t, '﻿ [{"a": 1, "a": 2},'),
+                 id="identical_malformed_array"),
+    pytest.param(lambda t: (t["execution"]["events"][-1].update(
+        n_tool_calls=0, metadata={"n_tool_calls": 1}), t["execution"]["tool_calls"].pop()),
+                 id="metadata_declares_calls_on_request_telemetry"),
+    pytest.param(lambda t: [call.update(tool_name=name) for call, name in zip(
+        t["execution"]["tool_calls"], (1, True), strict=True)], id="tool_name_type"),
+    pytest.param(lambda t: _set_arguments(t, {"argv": ["ls", "-a"]}, {"argv": ["-a", "ls"]}),
+                 id="reordered_array"),
+    pytest.param(lambda t: _mirror(t).update(event_idx=False), id="boolean_event_id"),
+    pytest.param(lambda t: t["execution"]["events"][-1].update(metadata={"n_tool_calls": 2}),
+                 id="metadata_count_disagrees"),
+    pytest.param(lambda t: _mirror(t).update(tool_name="python"), id="different_tool"),
+    pytest.param(lambda t: _mirror(t).update(call_id_source="call-2"), id="unknown_call_id"),
+    pytest.param(lambda t: _mirror(t).pop("call_id_source"), id="missing_call_id"),
+    pytest.param(lambda t: _mirror(t).update(truncated=True), id="truncated_mirror"),
+    pytest.param(lambda t: t["execution"]["tool_calls"].pop(), id="declared_call_missing"),
+    pytest.param(lambda t: t["execution"]["tool_calls"].append(
+        {**_mirror(t), "call_idx": 1}), id="repeated_mirror"),
+    pytest.param(lambda t: t["execution"]["tool_calls"].append(
+        {**t["execution"]["tool_calls"][0], "event_idx": 2}), id="ambiguous_original"),
+    # Each count agrees, so only the one-mirror-per-call and unique-identity checks reject.
+    pytest.param(lambda t: (
+        t["execution"]["events"].append({**t["execution"]["events"][-1], "event_idx": 1}),
+        t["execution"]["tool_calls"].append({**_mirror(t), "event_idx": 1}),
+    ), id="two_events_one_original"),
+    pytest.param(lambda t: t["execution"]["events"].append({**t["execution"]["events"][-1]}),
+                 id="duplicate_telemetry_identity"),
+    pytest.param(lambda t: t["execution"]["events"][-1].update(n_tool_calls=2),
+                 id="count_disagrees"),
+    pytest.param(lambda t: t["execution"]["events"][-1].update(role="assistant"),
+                 id="unclassified_model_call"),
+    pytest.param(lambda t: t["execution"]["events"][-1]["parts"][0].update(origin="response"),
+                 id="response_payload"),
+])
+def test_unverified_model_call_tool_calls_block_interval_coverage(tmp_path, mutation):
+    trace = _local_import_trace()
+    mutation(trace)
+    review = _review(tmp_path, trace)
+    assert review.interval_navigation()["available"] is False
+    _read_everything(review)
+    with pytest.raises(ValueError, match="verified|declared count|ambiguous original"):
+        review.review_interval("no_backup", 1, 2, end_citation_id=_anchor(review))
+    assert review.intervals == {}
 
 
 def test_unsupported_plain_text_and_conflicting_traces_fail_closed(tmp_path):

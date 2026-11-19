@@ -38,6 +38,8 @@ from autofa.data.reference_data import event_url, rollout_url
 from autofa.data.source_errors import SourceDataError
 from autofa.data.sources import EvalSource, discover_eval_sources
 from autofa.data.trace_navigation import trace_events
+from autofa.metrics.judge_evidence import make_snapshot
+from autofa.metrics.judge_intervals import interval_navigation
 from autofa.wizard import dataset
 from evalrdl_schema import CURRENT, polars_schemas
 from evalrdl_schema.tables import RunTables
@@ -513,6 +515,28 @@ def test_recorded_requests_resolve_message_and_tool_hashes_without_truncation(tm
     assert evidence["tools"][call["tools"]][0] == tool
     assert call["request_metadata"]["temperature"] == 0.25
     assert len({e["lane"] for e in envelope["execution"]["events"]}) == 2
+
+
+@pytest.mark.parametrize("capture_only_call", [False, True])
+def test_model_call_capture_of_conversation_tool_calls_keeps_interval_navigation(
+    tmp_path, capture_only_call,
+):
+    arguments = json.dumps({"command": "cat file"})
+    calls = [{"call_id": "call-a", "name": "bash", "arguments": arguments}]
+    if capture_only_call:  # A call absent from the conversation is an unordered action.
+        calls.append({"call_id": "call-z", "name": "bash", "arguments": "{}"})
+
+    def capture(record):
+        record["ng_model_call_capture"] = {"calls": [
+            {"model_call_id": "model-call-1", "dialect": "responses", "tool_calls": calls},
+        ]}
+
+    row = first_row(import_local_run(gym_run(tmp_path / "gym", edit=capture)).parquet_path)
+    navigation = interval_navigation(make_snapshot(
+        {"response_text": row["response_text"]}, item_id="case", source="local"))
+    assert navigation["available"] is not capture_only_call
+    if not capture_only_call:
+        assert all(event["complete"] for event in navigation["events"])
 
 
 @pytest.mark.parametrize("captured_simulator", [False, True])

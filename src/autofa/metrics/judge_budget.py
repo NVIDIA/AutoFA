@@ -71,6 +71,9 @@ def plan_review_budget(review: EvidenceReview, max_turns: int = 64) -> ReviewWor
     ``max_turns`` remains the baseline allowance. Additional calls are justified
     by the frozen workload, up to a fixed shared ceiling. Local predicates do not
     acquire an exhaustive-read requirement merely because a trace is large.
+    A bounded interval is located only when review_interval binds it during the
+    review, so its full-trace reservation is an upper bound: it is capped at the
+    shared ceiling and is never by itself a reason to refuse dispatch.
     """
     if max_turns < 1 or max_turns > MAX_TOOL_CALLS:
         raise ReviewBudgetError(f"review baseline must be between 1 and {MAX_TOOL_CALLS}",
@@ -82,21 +85,26 @@ def plan_review_budget(review: EvidenceReview, max_turns: int = 64) -> ReviewWor
         if "whole_trace" in scopes
         else ("bounded_interval" if "bounded_interval" in scopes else "local")
     )
+    # A bounded clause is supported only through an interval receipt, which needs a
+    # certified event order. Without one, reading the whole trace cannot support the
+    # clause, so its evidence reads are planned like a local clause.
+    reserve_trace = scope == "whole_trace" or (
+        scope == "bounded_interval" and review.interval_navigation()["available"]
+    )
     source = review.fields["detector_source"]
     fields = [
         value
         for field, value in review.fields.items()
         if field != "detector_source" and review.snapshot["manifest"][field]["origin"] == "stored"
     ]
+    source_reads = math.ceil(len(source) / MAX_READ_CHARS)
     full_reads = sum(math.ceil(len(value) / MAX_READ_CHARS) for value in fields)
     # Until semantic interval boundaries are bound, navigation may need the full
     # source. This reserves capacity; it does not broaden the frozen predicate.
-    reads = (full_reads if scope != "local" else min(full_reads, 8)) + math.ceil(
-        len(source) / MAX_READ_CHARS
-    )
+    reads = (full_reads if reserve_trace else min(full_reads, 8)) + source_reads
     chars = len(source) + (
         sum(len(value) for value in fields)
-        if scope != "local"
+        if reserve_trace
         else min(sum(len(value) for value in fields), 8 * MAX_READ_CHARS)
     )
     clauses = sum(row.get("kind") == "defining_clause" for row in requirements)
@@ -120,11 +128,19 @@ def plan_review_budget(review: EvidenceReview, max_turns: int = 64) -> ReviewWor
     navigation = 2 + 6 * bounded
     # Pagination estimates describe a perfect single pass. Partial pages,
     # boundary context and refreshed decisive citations require additional reads.
-    rereads = math.ceil(reads / 2) if scope != "local" else 0
+    rereads = math.ceil(reads / 2) if reserve_trace else 0
     finalization = 8
     required = reads + rereads + citations + artifact_calls + navigation + finalization
     limit = max(max_turns, required)
-    if limit > MAX_TOOL_CALLS or chars + required * 512 > MAX_TEXT_CHARS:
+    over = limit > MAX_TOOL_CALLS or chars + required * 512 > MAX_TEXT_CHARS
+    fixed = source_reads + citations + artifact_calls + navigation + finalization
+    if over and scope == "bounded_interval" and reserve_trace and fixed <= MAX_TOOL_CALLS:
+        # Only the bound interval's required ranges must be read. SDK turn and tool
+        # limits are fixed when an attempt starts, so fund the shared ceiling now.
+        # Runtime charges still stop at it, and validation still rejects support for
+        # any unread required range. Work outside the interval must still fit.
+        limit, over = MAX_TOOL_CALLS, False
+    if over:
         raise ReviewBudgetError(
             f"review workload exceeds bounded capacity before model dispatch: scope={scope}, "
             f"projected_chars={chars}, required_read_calls={reads}, "
