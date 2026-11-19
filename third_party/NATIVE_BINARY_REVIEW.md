@@ -17,10 +17,12 @@ from `libavcodec` to the bundled `libx264` and `libx265`, and FFmpeg configurati
 strings with `--enable-libx264`, `--enable-libx265` and `--enable-version3` but
 without `--enable-gpl`.
 
-AutoFA now declares, installs and distributes no PyAV or FFmpeg; the only codecs in its
-declared dependencies are Pillow's, described below. Removing PyAV and faster-whisper also removed CTranslate2 (with its bundled
-`libgomp` and its oneMKL/oneDNN or OpenBLAS components), ONNX Runtime and the other
-packages only faster-whisper needed: 14 packages in all. Their notices are no longer
+AutoFA now declares, installs and distributes no PyAV or FFmpeg, and no audio or video
+codec. Its declared dependencies do include image codecs: Pillow's AV1 and WebP codecs are
+described below, and Pillow and pypdfium2 (PDFium) also read formats such as JPEG, PNG,
+GIF, TIFF and JPEG 2000. Removing PyAV and faster-whisper also removed CTranslate2 (with
+its bundled `libgomp` and its oneMKL/oneDNN or OpenBLAS components), ONNX Runtime and the
+other packages only faster-whisper needed: 14 packages in all. Their notices are no longer
 retained.
 
 ## Pillow bundles AV1 and WebP image codecs
@@ -54,8 +56,7 @@ can write a small video. The build enables no
 other codec, no hardware codec interface and no network protocol, and uses none of
 `--enable-gpl`, `--enable-version3` or `--enable-nonfree`; FFmpeg reports its license
 as "LGPL version 2.1 or later". CI checks that the PyAV built against it reports
-exactly this codec list. The license and patent terms of codecs that a user adds are
-theirs to review.
+exactly this codec list. AutoFA documents and tests only this build.
 
 ## Redistribution
 

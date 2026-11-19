@@ -13,6 +13,10 @@ continue as the AutoFA driver in the same conversation. Do not stop at installat
    environment, register the outer driver with the current host, and verify the local CLI.
    Reuse a working installation and existing configuration. Resolve paths from this file's
    directory, not an assumed working directory or a different AutoFA checkout.
+   Office rendering, audio/video inspection and speech transcription are optional: ask the
+   user which they need and install only those, using only the commands in
+   [optional readers](docs/agent-setup.md#optional-readers-ask-first). Never install PyAV
+   from PyPI or build FFmpeg with codecs outside the documented build.
 3. Continue with the user's goal using the driver: establish inputs and constraints, review
    model/effort choices and relevant cloud detectors, then execute the selected native workflow.
    Ask only for missing consequential choices or user-only sign-in/credential actions. If the

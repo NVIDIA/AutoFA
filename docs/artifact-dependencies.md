@@ -1,44 +1,48 @@
 # Artifact inspection dependencies
 
-Discovery agents and reviewers can check the current machine and explicitly
-prepare a needed reader with `prepare_artifact_support`. A normal artifact read
+Discovery agents and reviewers can check the current machine with
+`prepare_artifact_support` and download a speech model. A normal artifact read
 does not install packages or fetch model files.
 
 ```python
-prepare_artifact_support(capability="office")  # Inspect availability.
-prepare_artifact_support(capability="office", install=True)  # Install LibreOffice.
+prepare_artifact_support(capability="office")  # Check for LibreOffice; never installs.
 prepare_artifact_support(capability="audio")  # Check for PyAV; never installs.
 prepare_artifact_support(capability="speech", install=True, model="base")  # Download a model.
 ```
 
-With `install=True`, the tool installs LibreOffice for `office` and downloads the
-selected speech model for `speech`. It never installs Python packages, PyAV or
-FFmpeg; `audio` only reports whether PyAV is available. The installer accepts only
-the supported capability names and fixed package commands. It does not execute
-installation commands supplied by an artifact.
-Already available dependencies are reused. Setup can take several minutes;
-cancellation stops the installer, and a timeout or permission failure returns
-explicit diagnostics so the agent does not mistake an unread file for missing
-evidence.
+With `install=True`, the tool downloads the selected speech model for `speech`. It
+never installs LibreOffice, Python packages, PyAV or FFmpeg: `office` and `audio` only
+report whether LibreOffice and PyAV are available, with a link to the matching section
+below. The tool accepts only the supported capability and model names, and it does not
+execute installation commands supplied by an artifact. A downloaded model is reused.
+A download can take several minutes; cancellation stops it, and a timeout or failure
+returns explicit diagnostics so the agent does not mistake an unread file for missing
+evidence. An agent that sets up AutoFA asks you before installing any of these readers
+([agent setup](agent-setup.md#optional-readers-ask-first)).
 
 ## Office pages and slides
 
 PDF page rendering, image decoding and native DOCX/XLSX/PPTX text readers are
 included in AutoFA's Python dependencies. Office visual rendering additionally
-uses [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/).
-The setup tool uses an existing platform package manager:
+uses [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/), which
+you install; AutoFA only checks for it. On some Linux distributions the default
+LibreOffice packages also install audio and video codec libraries, so use these
+commands:
 
 | Platform | Installation command |
 | --- | --- |
 | macOS with Homebrew | `brew install --cask libreoffice` |
-| Debian/Ubuntu | `apt-get install -y libreoffice fonts-dejavu-core` |
-| Fedora | `dnf install -y libreoffice` |
+| Debian/Ubuntu | `sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-core-nogui libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui fonts-dejavu-core` |
 | Windows with winget | `winget install --id TheDocumentFoundation.LibreOffice --exact` |
 
-Linux installs use `sudo -n` when necessary and never ask for a password inside
-the agent session. If the host requires administrator approval, install the
-package outside AutoFA and retry the same artifact view. The tool does not
-install a missing package manager.
+The Debian/Ubuntu command installs only the headless LibreOffice core and the Writer,
+Calc and Impress components that rendering needs, without GStreamer or audio and video
+codec libraries; it was checked on Ubuntu 24.04 and Debian 12 and 13, including
+conversion of DOCX, XLSX and PPTX files to PDF. AutoFA documents no command for Fedora
+or other systems: Fedora's `libreoffice` package brings codec libraries through GStreamer
+even without weak dependencies. There, Office page images stay unavailable unless you
+install LibreOffice yourself. An agent asks you first and runs only a command from this
+table.
 
 AutoFA finds LibreOffice on PATH, in standard macOS application folders, and in
 Windows Program Files. For a custom installation, set `AUTOFA_LIBREOFFICE` to the
@@ -54,8 +58,9 @@ exact typography is material to the claim.
 ## Audio, video and speech
 
 AutoFA declares, installs and distributes no FFmpeg or PyAV, so its standard
-installation (`uv sync` or `pip install`) brings in no audio or video decoder; the
-only codecs among its dependencies are Pillow's AV1 and WebP image codecs
+installation (`uv sync` or `pip install`) brings in no audio or video codec. Its
+dependencies do include image codecs: Pillow and pypdfium2 read formats such as JPEG,
+PNG, GIF, TIFF, WebP, AVIF and JPEG 2000
 ([notices](../THIRD_PARTY_NOTICES.md#dependency-notice-snapshot)). PyAV's PyPI
 wheels bundle an FFmpeg with many more codecs, including the GPL-licensed x264 and
 x265 encoders for H.264 and HEVC, so AutoFA no longer installs them. Audio and video
@@ -86,7 +91,7 @@ Install the build prerequisites first:
 
 | Platform | Command |
 | --- | --- |
-| Ubuntu/Debian | `sudo apt-get install build-essential pkg-config nasm zlib1g-dev python3-dev libdav1d-dev libvpx-dev libopus-dev libvorbis-dev` |
+| Ubuntu/Debian | `sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config nasm zlib1g-dev python3-dev libdav1d-dev libvpx-dev libopus-dev libvorbis-dev` |
 | macOS with Homebrew | `brew install pkgconf dav1d libvpx opus libvorbis`, plus `nasm` on Intel Macs |
 
 `python3-dev` provides the headers PyAV compiles against when the environment uses
@@ -163,6 +168,6 @@ demuxers and decoders the linked FFmpeg provides. With the documented build:
 A missing demuxer or decoder is reported as unavailable, not as an error: an evidence
 gap, never evidence that content is absent. The original file remains downloadable.
 
-You may build FFmpeg with other codecs, for example H.264, HEVC, AAC or MP3, and
-build PyAV against it in the same way. The license and patent terms of codecs you
-add are yours to review.
+AutoFA's instructions cover only the codecs listed above. Builds with other codecs
+aren't documented or tested by AutoFA; making one, and its license and patent terms,
+are your decision.

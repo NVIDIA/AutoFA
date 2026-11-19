@@ -191,11 +191,11 @@ an evidence gap, never evidence that content is absent.
 
 Readers can be checked on demand with
 `prepare_artifact_support(capability="office" | "audio" | "speech")`. With
-`install=True`, office setup installs LibreOffice with a fixed package command, and
-speech setup downloads an allowlisted local model (`tiny`, `base`, or `small`) once
-PyAV and faster-whisper are installed. Audio setup only reports whether PyAV is
-available; the tool never installs PyAV, faster-whisper or FFmpeg. Ordinary artifact
-reads and saved-evidence revalidation never install packages or download models. See
+`install=True`, speech setup downloads an allowlisted local model (`tiny`, `base`, or
+`small`) once PyAV and faster-whisper are installed. Office and audio setup only report
+whether LibreOffice and PyAV are available; the tool never installs LibreOffice, PyAV,
+faster-whisper or FFmpeg. Ordinary artifact reads and saved-evidence revalidation never
+install packages or download models. See
 [artifact dependency setup](artifact-dependencies.md) for platform requirements.
 
 For ZIPs, inspect the member inventory, then pass `member_path="folder/file.pdf"`

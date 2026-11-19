@@ -47,12 +47,13 @@ NumPy and PDFium texts are retained in their respective `linux/` notice director
 This records the notices supplied by the selected wheels, not a complete review
 of every library embedded in them.
 
-AutoFA declares no PyAV, FFmpeg or other audio/video codec dependency. The only
-codec libraries that the [native codec review](third_party/NATIVE_BINARY_REVIEW.md)
-found in the declared dependencies are Pillow's, for AVIF and WebP images:
-libavif with the dav1d AV1 decoder and the libaom AV1 encoder, and libwebp.
-Audio and video inspection uses a PyAV that the user builds against an
-FFmpeg of their choice ([setup](docs/artifact-dependencies.md#audio-video-and-speech));
+AutoFA declares no PyAV, FFmpeg or other audio/video codec dependency. Its
+declared dependencies do include image codecs: the
+[native codec review](third_party/NATIVE_BINARY_REVIEW.md) describes Pillow's AVIF
+and WebP codecs (libavif with the dav1d AV1 decoder and the libaom AV1 encoder, and
+libwebp), and Pillow and pypdfium2 also read formats such as JPEG, PNG, GIF, TIFF and
+JPEG 2000. Audio and video inspection uses a PyAV that the user builds with the
+documented FFmpeg build ([setup](docs/artifact-dependencies.md#audio-video-and-speech));
 that build is outside this inventory. Review the applicable license terms,
 remaining embedded/static libraries and source-compliance arrangements before
 redistributing dependency binaries or container images.

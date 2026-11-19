@@ -40,11 +40,31 @@ will be changed. Check that the import belongs to this checkout, not another ins
 Use `uv run --no-sync autofa ...` from here after synchronization. Recheck dependencies when
 the checkout's requirements change rather than reinstalling on every status request.
 
-The standard installation contains no FFmpeg or PyAV (its only codecs are Pillow's AV1 and
-WebP image codecs), and setup does not build them. Do not install PyAV from PyPI or use the removed `--extra audio`. Build them only
-when the user asks for audio/video inspection or speech transcription, following
-[audio, video and speech](artifact-dependencies.md#audio-video-and-speech). Keep `--inexact`:
-an exact `uv sync` removes the user-built PyAV and faster-whisper.
+### Optional readers: ask first
+
+The standard installation contains no audio or video codecs, FFmpeg, PyAV or LibreOffice.
+Only some users need these readers. Ask the user once, during setup, which of them they need,
+install only those, and install nothing for a reader they decline. If an analysis later
+reports one of these readers unavailable, offer it then.
+
+- **Office rendering** (visual pages of DOCX, XLSX and PPTX files): install LibreOffice with
+  the command for the user's platform in
+  [office pages and slides](artifact-dependencies.md#office-pages-and-slides). These
+  commands can need administrator rights; if one would prompt for a password, give the user
+  the command to run instead. Use no other LibreOffice package command: on some Linux
+  distributions the default packages also install audio and video codecs. Where no command
+  is documented for the user's platform, install nothing and tell the user.
+- **Audio and video inspection**: follow
+  [audio, video and speech](artifact-dependencies.md#audio-video-and-speech). It installs
+  codec libraries with the system package manager and builds FFmpeg and PyAV from source
+  with only royalty-free codecs.
+- **Speech transcription**: offer it as its own option. It needs the audio and video setup
+  first and adds faster-whisper and its dependencies, each under its own license.
+
+Never install PyAV from PyPI, use the removed `--extra audio`, or build FFmpeg with other
+codecs (for example H.264, HEVC, AAC or MP3). If the user asks for other codecs, say that
+AutoFA documents only this build and that other builds are their own decision. Keep
+`--inexact`: an exact `uv sync` removes the user-built PyAV and faster-whisper.
 
 The help/import checks need no model credentials or inference. Preserve `.env`, `autofa.toml`,
 `AUTOFA_CONFIG`, `AUTOFA_HOME` and saved runs; installation must not reset the user's profile.

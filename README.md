@@ -85,7 +85,8 @@ Read AGENTS.md, set up AutoFA, and analyze these runs: <links or paths>.
 Aim for eight supported failure modes with high combined recall by end of day.
 ```
 
-The agent installs AutoFA, registers the `autofa-driver` skill and continues as your
+The agent installs AutoFA, asks before installing optional readers such as LibreOffice or
+audio and video support, registers the `autofa-driver` skill and continues as your
 analysis driver: it helps choose models and effort, picks the right workflow, monitors
 progress, and summarizes findings with suggested next steps. Leave out the analysis goal
 to set up only. Later, invoke the skill directly with `/autofa-driver` in Claude Code or
@@ -171,10 +172,13 @@ Results persist under `~/.autofa/`.
 - Initial reading of local runs holds the run in memory, so very large rollouts or expanded
   request histories can exceed the hydration batch budget. Supplying missing metadata
   labels currently rereads the original logs.
-- AutoFA ships no FFmpeg or PyAV; its only codec libraries are Pillow's AV1 and WebP image
-  codecs. Inspecting audio and video artifacts needs a PyAV that you build as described in
-  [audio, video and speech](docs/artifact-dependencies.md#audio-video-and-speech);
-  otherwise those artifacts are reported unavailable.
+- AutoFA installs no audio or video codecs, FFmpeg, PyAV or LibreOffice. Its dependencies
+  do include image codecs: Pillow and pypdfium2 read formats such as JPEG, PNG, GIF, TIFF,
+  WebP, AVIF and JPEG 2000. Office rendering and audio and video inspection need readers
+  that you install as described in
+  [artifact inspection dependencies](docs/artifact-dependencies.md); a setup agent asks
+  before installing them. Without them, Office page images and audio and video content are
+  reported unavailable.
 
 ## Support and contributing
 
