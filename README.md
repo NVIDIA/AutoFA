@@ -129,7 +129,7 @@ Results persist under `~/.autofa/`.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="img/autofa-overview-dark.svg">
-    <img src="img/autofa-overview.svg" alt="AutoFA overview: NeMo Gym, Harbor and EvalRDL runs pass optional preflight cheating checks, then two complementary workflows run in parallel: bottom-up failure discovery (with optional efficiency metrics) and top-down taxonomy classification. Results land in a browsable failure library, and a coding agent can drive every workflow." width="900">
+    <img src="img/autofa-overview.svg" alt="AutoFA overview: NeMo Gym, Harbor and EvalRDL runs pass optional preflight cheating checks, then two complementary workflows run in parallel: top-down taxonomy classification and bottom-up failure discovery (with optional efficiency metrics); optionally, one taxonomy category can be explored further with failure discovery. Results land in a browsable failure library, and a coding agent can drive every workflow." width="900">
   </picture>
 </p>
 
