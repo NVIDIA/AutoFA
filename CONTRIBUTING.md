@@ -329,7 +329,7 @@ Explain what changed and why in commit messages.
 
 [`.pre-commit-config.yaml`](.pre-commit-config.yaml) checks the files in each commit:
 YAML, TOML and JSON syntax, merge-conflict markers, files over 1 MB except versioned
-`.tar.zst` release data and the two browser-openable example HTML reports under
+`.tar.zst` release data and browser-openable example HTML reports under
 `eval_data/`, private keys, trailing whitespace and final newlines, Ruff, the layering
 contracts, license headers and the
 [secrets scan](#secrets-scan). The whitespace hooks skip `eval_data/*.tar.zst`,
