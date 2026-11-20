@@ -17,7 +17,7 @@ repos:
       - id: check-case-conflict
       - id: check-added-large-files
         args: [--maxkb=1000, --enforce-all]
-        exclude: ^eval_data/(?:.*\.tar\.zst|example_reports/(?:glm|inkling)\.html)$
+        exclude: ^eval_data/(?:.*\.tar\.zst|example_reports/(?:glm|inkling|super)\.html)$
       - id: detect-private-key
       # Fixtures and license texts keep their original bytes.
       - id: end-of-file-fixer

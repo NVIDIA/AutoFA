@@ -8,7 +8,8 @@ commands from the repository root.
 ## Example reports
 
 To inspect results without running AutoFA, download and open the self-contained
-[Inkling](example_reports/inkling.html) and [GLM](example_reports/glm.html) reports.
+[Inkling](example_reports/inkling.html), [GLM](example_reports/glm.html), and
+[Super](example_reports/super.html) reports.
 
 ### Interpreting the reports
 
@@ -44,6 +45,7 @@ Run `codex login` if needed.
 mkdir -p eval_data/uncompressed
 zstd -dc eval_data/inkling.tar.zst | tar -xf - -C eval_data/uncompressed
 zstd -dc eval_data/glm.tar.zst | tar -xf - -C eval_data/uncompressed
+zstd -dc eval_data/super.tar.zst | tar -xf - -C eval_data/uncompressed
 ```
 
 ## 3. Run AutoFA
@@ -54,9 +56,11 @@ These commands can make thousands of Codex model calls:
 export AUTOFA_HOME="$PWD/.tmp/autofa-eval-data"
 uv run --no-sync autofa run --config eval_data/inkling.yaml --once
 uv run --no-sync autofa run --config eval_data/glm.yaml --once
+uv run --no-sync autofa run --config eval_data/super.yaml --once
 ```
 
 Reports are written to:
 
 - `eval_data/outputs/inkling/report.html`
 - `eval_data/outputs/glm/report.html`
+- `eval_data/outputs/super/report.html`

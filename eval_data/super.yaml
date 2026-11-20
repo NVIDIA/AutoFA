@@ -1,0 +1,23 @@
+version: 2
+workflow: classification
+
+source:
+  local_folder: uncompressed/super
+
+selection:
+  per_run: 1362
+  sample: first
+  seed: 0
+  cache: outputs/super/evidence
+
+taxonomy:
+  runs:
+    - first_pass: agentic
+      second_pass: agentic
+      judges:
+        - name: gpt-6.1-sol-agentic-updated
+          harness: codex
+          workers: 4
+          output: outputs/super/classifications.jsonl
+      report:
+        output: outputs/super/report.html
