@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 520" width="1000" height="520" role="img" aria-labelledby="title desc">
   <title id="title">AutoFA overview</title>
-  <desc id="desc">Evaluation runs from NeMo Gym, Harbor or EvalRDL first pass optional preflight cheating checks. Two complementary workflows then run in parallel: top-down taxonomy classification and bottom-up failure discovery, which can include efficiency metrics. A taxonomy bucket can seed a discovery run. Results land in the AutoFA Report Server. A coding agent with the autofa skill can configure, launch and monitor every workflow.</desc>
+  <desc id="desc">Evaluation runs from NeMo Gym, Harbor or EvalRDL first pass optional preflight cheating checks. Two complementary workflows then run in parallel: top-down taxonomy classification and bottom-up failure discovery, which can include efficiency metrics. Optionally, one taxonomy category can be explored further with failure discovery. Results land in the AutoFA Report Server. A coding agent with the autofa skill can configure, launch and monitor every workflow.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse" orient="auto">
       <path d="M0,0 L10,5 L0,10 z" fill="#656d76"/>
@@ -91,13 +91,10 @@
   <rect x="696" y="157" width="8" height="6" rx="1.5" fill="#ffffff"/>
   </g>
 
-  <!-- A taxonomy bucket seeds a discovery cohort -->
-  <line x1="384" y1="252" x2="384" y2="288" stroke="#0969da" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
-  <text x="394" y="274.5" style="font-size:11.5px;font-weight:600;fill:#0969da">a bucket seeds discovery</text>
-
-  <!-- Parallel badge, centred in the gap between the lanes -->
-  <rect x="566" y="259" width="150" height="22" rx="11" fill="#ffffff" stroke="#8c959f" stroke-width="1"/>
-  <text x="641" y="274.5" text-anchor="middle" style="font-size:11px;font-weight:600;fill:#424a53">parallel · complementary</text>
+  <!-- Optional hand-off: a taxonomy category can be explored further with discovery -->
+  <line x1="384" y1="252" x2="384" y2="288" stroke="#0969da" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#arrow-blue)"/>
+  <text x="396" y="274.5" class="tag" style="fill:#0969da">OPTIONAL</text>
+  <text x="468" y="274.5" class="m" style="font-size:12px">drill into one category with discovery</text>
 
   <!-- Discovery lane, with efficiency as part of it -->
   <rect x="352" y="290" width="368" height="170" rx="12" fill="#f6f8fa" stroke="#5e9400" stroke-width="1.5"/>
