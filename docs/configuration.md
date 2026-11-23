@@ -591,6 +591,19 @@ Both harnesses also have a 10-minute session timeout. The same bounded pass
 setup is available from
 **Settings > Taxonomy classification** and the interactive classification flow.
 
+Practical starting points:
+
+- Use **128** for short-to-medium traces with limited tool history and few
+  artifacts, such as many GDPVal and SWE-Bench tasks.
+- Use **256** for long, tool-heavy traces with extensive verifier output,
+  hundreds of events, or several artifacts, as can occur in some
+  Terminal-Bench and DeepSWE tasks.
+- Use **`none`** for controlled runs over extreme traces that require repeated
+  paging through very large logs or artifacts; the 10-minute timeout remains.
+
+If many traces need the last tier, narrower artifact search is a better fix
+than setting an ever-higher default.
+
 Persistent defaults in the repository's `autofa.toml`:
 
 ```toml

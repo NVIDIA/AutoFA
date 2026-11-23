@@ -142,6 +142,12 @@ justifies the extra cost. These are recommendations, not restrictions.
   Citation, review-status, and submission calls do not count.
   `--agentic-max-turns none` removes the limit. Both harnesses also have a
   10-minute session timeout.
+  As a starting point, use 128 for short-to-medium traces with limited tool
+  history and few artifacts, such as many GDPVal and SWE-Bench tasks. Use 256
+  for long, tool-heavy traces with extensive verifier output, hundreds of
+  events, or several artifacts, as can occur in some Terminal-Bench and
+  DeepSWE tasks. Reserve `none` for controlled runs over extreme traces that
+  require repeated paging through very large logs or artifacts.
 
 A second pass can confirm, change, or withdraw the first-pass answer. Each
 rollout still ends with exactly one failure mode. On long traces, the reviewer
