@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import inspect
 import json
 import re
 from collections import Counter
@@ -67,6 +68,10 @@ TRACE_RESOURCE_NAMES = (
 
 class EvidenceBudgetExhausted(ValueError):
     """Shown to the judge as a tool error so it can still cite and submit."""
+
+
+class ToolArgumentError(ValueError):
+    """Tool arguments do not match the tool signature; the call is not charged."""
 
 
 def _default_checklist() -> dict[str, Any]:
@@ -386,8 +391,11 @@ class TaxonomyEvidenceReview:
             for event in trace.events(self._trace_source(), lane=lane)
             if event.get("event_idx") == event_idx
         ]
-        if len(events) != 1 or field not in events[0]:
-            raise ValueError("lane, event_idx, and field must identify exactly one event field")
+        if len(events) != 1:
+            raise ValueError("lane and event_idx must identify exactly one event")
+        if field not in events[0]:
+            available = ", ".join(key for key in events[0] if key != "parts")
+            raise ValueError(f"event has no field {field!r}; available: {available}")
         value = events[0][field]
         return events[0], value if isinstance(value, str) else _canonical(value)
 
@@ -734,8 +742,8 @@ class TaxonomyEvidenceReview:
         lane: str,
         event_idx: int,
         part_idx: int,
-        field: str,
         quote: str,
+        field: str = "text",
         offset: int = 0,
     ) -> dict[str, Any]:
         """Cite exact event-part text already read."""
@@ -1315,6 +1323,8 @@ class TaxonomyEvidenceReview:
         )
 
     def search_taxonomy(self, query: str = "", limit: int = 50) -> dict[str, Any]:
+        if not isinstance(query, str):
+            raise ValueError("query must be text")
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("limit must be an integer between 1 and 100")
         needle = query.strip().casefold()
@@ -1648,7 +1658,9 @@ class TaxonomyEvidenceReview:
             ),
             (
                 "read_trace_event_field",
-                "Read one exact non-part field from a native execution event.",
+                "Read one exact non-part field that list_trace_events summarized, such as "
+                "event_text or metadata. Use read_trace_event_part for part content and "
+                "read_trace_step for normalized step fields.",
                 _schema(
                     {
                         "lane": string,
@@ -1694,7 +1706,7 @@ class TaxonomyEvidenceReview:
             ),
             (
                 "cite_trace_event_part",
-                "Cite exact event-part text already read.",
+                "Cite exact event-part text already read; field defaults to text.",
                 _schema(
                     {
                         "lane": string,
@@ -1704,7 +1716,7 @@ class TaxonomyEvidenceReview:
                         "quote": string,
                         "offset": integer,
                     },
-                    ["lane", "event_idx", "part_idx", "field", "quote"],
+                    ["lane", "event_idx", "part_idx", "quote"],
                 ),
                 self.cite_trace_event_part,
             ),
@@ -1921,9 +1933,17 @@ class TaxonomyEvidenceReview:
         name: str,
         callback: Callable[..., dict[str, Any]],
     ) -> Callable[..., dict[str, Any]]:
+        signature = inspect.signature(callback)
+
         def invoke(**arguments: Any) -> dict[str, Any]:
             self.total_tool_calls += 1
             try:
+                try:
+                    signature.bind(**arguments)
+                except TypeError as exc:
+                    raise ToolArgumentError(
+                        f"{name}: {exc}; accepted arguments: {', '.join(signature.parameters)}"
+                    ) from None
                 self._charge_evidence_call(name)
                 return callback(**arguments)
             except Exception as exc:
@@ -1931,6 +1951,7 @@ class TaxonomyEvidenceReview:
                     {
                         "name": name,
                         "arguments_sha256": _sha256(_canonical(arguments)),
+                        "argument_names": sorted(key[:64] for key in arguments)[:16],
                         "is_error": True,
                         "error_type": type(exc).__name__,
                     }

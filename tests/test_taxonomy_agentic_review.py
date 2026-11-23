@@ -165,12 +165,13 @@ def test_agentic_trace_tools_reuse_normalized_evalrdl_navigation() -> None:
     assert read["text"] == "wrong branch"
     citation = review.cite_trace(2, "reasoning", "wrong branch")
     assert citation["source_event"]["event_idx"] == 1
-    event_citation = review.cite_trace_event_part(
-        "worker", 1, 0, "text", "auxiliary fact"
-    )
+    event_citation = review.cite_trace_event_part("worker", 1, 0, "auxiliary fact")
     assert event_citation["lane"] == "worker"
+    assert event_citation["field"] == "text"
     event_field = review.read_trace_event_field("worker", 1, "kind")
     assert event_field["text"] == "message"
+    with pytest.raises(ValueError, match="available: event_idx, lane, kind, role"):
+        review.read_trace_event_field("worker", 1, "tool_calls")
     field_citation = review.cite_trace_event_field(
         "worker", 1, "kind", "message"
     )
@@ -227,6 +228,24 @@ def test_agentic_tool_results_fail_closed_before_transport_overflow() -> None:
         )
 
     assert review.tool_calls == []
+
+
+def test_malformed_tool_arguments_explain_signature_without_spending_budget() -> None:
+    review = _review()
+    review.max_tool_calls = 1
+    tools = {name: callback for name, _, _, callback in review.specs()}
+
+    with pytest.raises(
+        agentic_review.ToolArgumentError, match="accepted arguments: field, offset, limit"
+    ):
+        tools["read_evidence"](field="incident", kind="text")
+
+    assert review.evidence_tool_calls == 0
+    assert review.budget_exhausted is False
+    assert review.tool_calls[-1]["error_type"] == "ToolArgumentError"
+    assert review.tool_calls[-1]["argument_names"] == ["field", "kind"]
+    with pytest.raises(ValueError, match="query must be text"):
+        tools["search_taxonomy"](query=None)
 
 
 def test_agentic_artifact_tools_read_view_and_cite_verified_evidence(monkeypatch) -> None:
