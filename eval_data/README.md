@@ -20,11 +20,6 @@ Download any self-contained report and open the HTML file locally:
 The `thinkingmachines/Inkling-Small` overview summarizes benchmark outcomes and shows how
 diagnosed failures are distributed across the taxonomy.
 
-![AutoFA failure detail with the localized event, judge rationale and causal chain](img/failure-evidence.png)
-
-The `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16` failure detail shows the localized
-critical event, supporting evidence, judge rationale, causal chain and recommended disposition.
-
 ### Interpreting the reports
 
 These are diagnostic views of failed rollouts, not model rankings or overall
