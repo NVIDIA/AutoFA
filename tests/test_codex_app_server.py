@@ -18,6 +18,7 @@ from autofa.harness import codex_app_server
 from autofa.harness.codex_app_server import (
     CodexAppServer,
     CodexAppServerError,
+    CodexTurnConnection,
     _error_details,
     compact_codex_thread,
     run_codex_turn,
@@ -57,6 +58,8 @@ def finish(text='done'):
         'id': 'answer', 'type': 'agentMessage', 'phase': 'final_answer', 'text': text}})
     event('turn/completed', {'threadId': 'thread-1', 'turn': {
         'id': 'turn-1', 'status': 'completed', 'items': []}})
+with open(os.environ['AUTOFA_TEST_CODEX_LOG'], 'a') as out:
+    out.write(json.dumps({'argv': sys.argv[1:]}) + '\n')
 for line in sys.stdin:
     request = json.loads(line)
     with open(os.environ['AUTOFA_TEST_CODEX_LOG'], 'a') as out:
@@ -80,6 +83,9 @@ for line in sys.stdin:
         elif params.get('model') == 'invalid':
             send({'id': request['id'], 'error': {'code': -32602, 'message': 'SECRET_TOKEN'}})
         elif params.get('model') == 'crash':
+            sys.exit(1)
+        elif params.get('model') == 'state-crash':
+            print('failed to initialize sqlite state runtime', file=sys.stderr, flush=True)
             sys.exit(1)
         else:
             environments = None if params.get('model') == 'old-cli' else []
@@ -305,6 +311,7 @@ def test_real_stdio_multiplexes_dynamic_text_and_image_tools(fake_codex):
     assert external["enabled"] is False and external["command"] == "/test/mcp"
     assert "tool_timeout_sec" not in external
     assert started["config"]["features.shell_tool"] is False
+    assert started["config"]["features.unified_exec"] is False
     turn = _sent(fake_codex, "turn/start")[0]
     assert turn["effort"] == "high"
     assert turn["environments"] == []
@@ -334,6 +341,12 @@ def test_resume_uses_persisted_tools_and_checkpoints_new_currency_before_round_c
     assert resumed["threadId"] == "thread-1"
     assert "dynamicTools" not in resumed
     assert not _sent(fake_codex, "thread/start")
+    [argv] = [message["argv"] for message in _messages(fake_codex[1]) if "argv" in message]
+    assert not any(
+        argument.startswith("sqlite_home=")
+        for index, argument in enumerate(argv)
+        if index and argv[index - 1] == "-c"
+    )
     # Only usage after the resumed thread's baseline is recorded.
     assert result.cost_usd == 1 and result.cost_kind == "reported"
     assert seen == [(0, 0.5), (1, 0.5)]
@@ -468,6 +481,71 @@ def test_request_error_and_eof_are_reported(fake_codex, model, code, retryable):
     assert result.error_code == code
     assert result.retryable is retryable
     assert "SECRET_TOKEN" not in result.error
+
+
+def test_restricted_fresh_turn_isolates_codex_state(fake_codex):
+    result = asyncio.run(run_codex_turn(**_args(fake_codex, prompt="plain")))
+
+    assert result.status == "completed"
+    [argv] = [message["argv"] for message in _messages(fake_codex[1]) if "argv" in message]
+    sqlite_override = next(
+        argv[index + 1]
+        for index, argument in enumerate(argv)
+        if argument == "-c" and argv[index + 1].startswith("sqlite_home=")
+    )
+    state_directory = Path(json.loads(sqlite_override.removeprefix("sqlite_home=")))
+    assert not state_directory.exists()
+
+
+def test_persistent_restricted_connection_isolates_codex_state(fake_codex):
+    async def scenario():
+        async with CodexTurnConnection() as connection:
+            result = await run_codex_turn(
+                **_args(fake_codex, prompt="plain", connection=connection)
+            )
+            [argv] = [
+                message["argv"]
+                for message in _messages(fake_codex[1])
+                if "argv" in message
+            ]
+            sqlite_override = next(
+                argv[index + 1]
+                for index, argument in enumerate(argv)
+                if argument == "-c" and argv[index + 1].startswith("sqlite_home=")
+            )
+            state_directory = Path(
+                json.loads(sqlite_override.removeprefix("sqlite_home="))
+            )
+            assert state_directory.exists()
+            assert result.status == "completed"
+        return state_directory
+
+    assert not asyncio.run(scenario()).exists()
+
+
+def test_state_initialization_failure_is_safe_and_retryable(fake_codex):
+    result = asyncio.run(run_codex_turn(**_args(fake_codex, model="state-crash")))
+
+    assert result.error_code == "stateInitializationFailed"
+    assert result.error == "Codex could not initialize its local state (exit code 1)."
+    assert result.retryable
+    [argv] = [message["argv"] for message in _messages(fake_codex[1]) if "argv" in message]
+    sqlite_override = next(
+        argv[index + 1]
+        for index, argument in enumerate(argv)
+        if argument == "-c" and argv[index + 1].startswith("sqlite_home=")
+    )
+    assert not Path(json.loads(sqlite_override.removeprefix("sqlite_home="))).exists()
+
+
+def test_state_initialization_json_rpc_error_is_retryable() -> None:
+    code, _message, retryable = _error_details({
+        "code": -32603,
+        "message": "failed to initialize sqlite state runtime",
+    })
+
+    assert code == "stateInitializationFailed"
+    assert retryable
 
 
 def test_request_timeout_closes_process(fake_codex):

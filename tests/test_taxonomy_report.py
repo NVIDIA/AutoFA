@@ -244,6 +244,18 @@ def test_judge_configuration_identifies_agentic_routes(row, fragments) -> None:
         assert f";{fragment};" in configuration
 
 
+def test_agentic_review_limit_distinguishes_legacy_and_investigation_budgets() -> None:
+    assert report._agentic_review_limit({"max_turns": 32}) == "32 turns"
+    assert report._agentic_review_limit({
+        "max_turns": 128,
+        "tool_budget_semantics": "investigation_calls_v1",
+    }) == "128 tool calls"
+    assert report._agentic_review_limit({
+        "max_turns": None,
+        "tool_budget_semantics": "investigation_calls_v1",
+    }) == "unlimited"
+
+
 def test_judge_configuration_keeps_composed_judges_separate() -> None:
     row = {
         "first_pass": {"method": "llm", "model": "first-a", "configuration_sha256": "a" * 64},

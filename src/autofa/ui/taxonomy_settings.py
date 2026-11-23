@@ -69,18 +69,18 @@ def select_taxonomy_workflow(
 
 
 def select_agentic_max_turns(default: int) -> int | None:
-    values = sorted({8, 16, 24, 32, 48, 64, default})
+    values = sorted({default, 64, 128, 256, 512, 1024, 2048})
     choice = select_option(
         "Agentic interaction limit per pass",
         [
             MenuItem(
                 str(turns),
                 turns,
-                "Claude turns or Codex evidence-tool calls.",
+                "Investigation-tool calls per pass.",
             )
             for turns in values
         ],
-        default_index=values.index(default),
+        default_index=values.index(default) if default in values else 0,
         allow_back=True,
     )
     if choice is None or is_menu_back(choice):
@@ -111,7 +111,7 @@ def configure_taxonomy(
                     "turns",
                     (
                         f"{draft.taxonomy_agentic_max_turns} · "
-                        "Claude turns / Codex tool calls"
+                        "investigation-tool calls per pass"
                     ),
                 ),
                 MenuItem("Back", "back"),

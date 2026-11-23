@@ -950,9 +950,13 @@ def build_classify_parser() -> argparse.ArgumentParser:
     )
     advanced.add_argument(
         "--agentic-max-turns",
-        type=int,
-        metavar="N",
-        help="Claude turn or Codex evidence-tool-call limit (default: Settings)",
+        type=_agentic_max_turns,
+        default=argparse.SUPPRESS,
+        metavar="N|none",
+        help=(
+            "Investigation-tool calls per agentic pass; none removes the limit "
+            "(default: Settings)"
+        ),
     )
     return parser
 
@@ -1006,6 +1010,18 @@ def _judge_param(text: str) -> tuple[str, Any]:
     return key.strip(), parsed
 
 
+def _agentic_max_turns(text: str) -> int | None:
+    if text.strip().lower() == "none":
+        return None
+    try:
+        value = int(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("use a positive integer, or none") from exc
+    if value < 1:
+        raise argparse.ArgumentTypeError("use a positive integer, or none")
+    return value
+
+
 def _classifier(
     args: argparse.Namespace, *, config: Any | None = None,
 ) -> TaxonomyClassifier:
@@ -1038,12 +1054,14 @@ def _classifier(
         from .agentic_review import AgenticClassificationProvider
 
         turns = (
-            getattr(args, "agentic_max_turns", None)
-            if getattr(args, "agentic_max_turns", None) is not None
+            args.agentic_max_turns
+            if hasattr(args, "agentic_max_turns")
             else cfg.taxonomy_agentic_max_turns
         )
         agentic_kwargs = {
-            "max_turns": validate_taxonomy_agentic_max_turns(turns),
+            "max_turns": (
+                None if turns is None else validate_taxonomy_agentic_max_turns(turns)
+            ),
         }
         if getattr(args, "_defer_judge_preflight", False):
             agentic_provider = AgenticClassificationProvider.from_config(
@@ -2000,6 +2018,12 @@ def _classification_profile(
     second_pass_configuration = _judge_configuration(
         classifier, classifier.second_pass
     )
+    agentic = classifier.agentic_provider
+    agentic_configuration = (
+        agentic.configuration()
+        if agentic is not None and callable(getattr(agentic, "configuration", None))
+        else None
+    )
     return {
         "taxonomy_sha256": classifier.taxonomy.content_sha256,
         "protocol_version": PROTOCOL_VERSION,
@@ -2010,8 +2034,46 @@ def _classification_profile(
         "second_pass_configuration_sha256": second_pass_configuration.get(
             "configuration_sha256"
         ),
+        "agentic_configuration": agentic_configuration,
         "parent_configuration": parent_configuration,
     }
+
+
+def _matches_judge_configuration(
+    record: dict[str, Any],
+    profile: dict[str, Any],
+    field: str,
+) -> bool:
+    judge = record.get("judge") or {}
+    recorded = judge.get(field)
+    expected = profile.get(field)
+    if recorded == expected:
+        return True
+    configuration = profile.get("agentic_configuration")
+    if not isinstance(configuration, dict) or expected != _configuration_sha256(configuration):
+        return False
+    prior_limit = judge.get("configured_max_turns")
+    if prior_limit is not None and type(prior_limit) is not int:
+        return False
+    legacy_configuration = {
+        key: value
+        for key, value in configuration.items()
+        if key != "tool_budget_semantics"
+    }
+    compatible = []
+    for limit in (prior_limit, None):
+        compatible.append({
+            **legacy_configuration,
+            "configured_max_turns": prior_limit,
+            "tool_call_limit": limit,
+        })
+    return any(recorded == _configuration_sha256(candidate) for candidate in compatible)
+
+
+def _configuration_sha256(configuration: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(configuration, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _matches_classification_profile(
@@ -2023,10 +2085,17 @@ def _matches_classification_profile(
         record.get("taxonomy_sha256") == profile["taxonomy_sha256"]
         and record.get("protocol_version") == profile["protocol_version"]
         and judge.get("requested_model") == profile["requested_model"]
-        and judge.get("configuration_sha256") == profile["configuration_sha256"]
+        and _matches_judge_configuration(
+            record,
+            profile,
+            "configuration_sha256",
+        )
         and _record_first_pass_method(record) == profile.get("first_pass", "llm")
-        and judge.get("second_pass_configuration_sha256")
-        == profile.get("second_pass_configuration_sha256")
+        and _matches_judge_configuration(
+            record,
+            profile,
+            "second_pass_configuration_sha256",
+        )
         and (
             profile.get("second_pass") is None
             or _record_second_pass_method(record) == profile["second_pass"]

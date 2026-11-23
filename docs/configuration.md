@@ -172,7 +172,7 @@ hub_base_url = ""  # No built-in endpoint; a deployment preset may set one
 hub_api_key_env = ""
 taxonomy_first_pass = "llm"  # llm or agentic
 taxonomy_second_pass = "llm"  # off, llm, or agentic
-taxonomy_agentic_max_turns = 32  # Claude turns or Codex tool calls per agentic pass
+taxonomy_agentic_max_turns = 128  # Investigation-tool calls per agentic pass
 
 # Optional EvalRDL remote server (run catalog + AutoFA parquet export)
 data_api_base_url = ""
@@ -580,10 +580,16 @@ prepared taxonomy group to
 `taxonomy_first_pass` selects `llm` or `agentic`; `taxonomy_second_pass` selects
 `off`, `llm`, or `agentic`. The `llm` mode uses the HTTP taxonomy judge. The
 `agentic` mode uses the separate Judge endpoint harness and model.
-`taxonomy_agentic_max_turns` is the per-pass interaction budget and must be
-between 1 and 128. It limits Claude model turns or Codex evidence-tool calls;
-both harnesses also have a 10-minute session timeout. The same pass setup and
-limit are available from **Settings > Taxonomy classification** and the interactive classification flow.
+`taxonomy_agentic_max_turns` is the positive per-pass interaction budget (128
+by default). It counts investigation calls that can reveal new evidence or
+taxonomy information for both Claude and Codex.
+Citations, review-status updates, and the final submission do not count. Once
+the budget is spent, further investigation calls are refused and the judge is
+asked to cite what it read and submit or abstain.
+`autofa classify --agentic-max-turns none` removes the limit for that command.
+Both harnesses also have a 10-minute session timeout. The same bounded pass
+setup is available from
+**Settings > Taxonomy classification** and the interactive classification flow.
 
 Persistent defaults in the repository's `autofa.toml`:
 

@@ -38,8 +38,23 @@ from .providers import ProviderError
 from .schema import Taxonomy
 
 AGENTIC_CLASSIFICATION_VERSION = "taxonomy-agentic-classification-v1"
+AGENTIC_TOOL_BUDGET_SEMANTICS = "investigation_calls_v1"
 AGENTIC_SESSION_TIMEOUT_SECONDS = 600
 CODEX_TRANSPORT_ATTEMPTS = 3
+MAX_AGENTIC_TOOL_RESULT_BYTES = 4 * 1024 * 1024
+UNBUDGETED_TOOLS = frozenset(
+    {
+        "cite_evidence",
+        "cite_trace",
+        "cite_trace_event_field",
+        "cite_trace_event_part",
+        "cite_trace_resource",
+        "cite_artifact",
+        "review_status",
+        "update_review_status",
+        "submit_classification",
+    }
+)
 TRACE_RESOURCE_NAMES = (
     "attempts",
     "relations",
@@ -48,6 +63,10 @@ TRACE_RESOURCE_NAMES = (
     "prompt_messages",
     "prompt_summaries",
 )
+
+
+class EvidenceBudgetExhausted(ValueError):
+    """Shown to the judge as a tool error so it can still cite and submit."""
 
 
 def _default_checklist() -> dict[str, Any]:
@@ -83,6 +102,10 @@ class TaxonomyEvidenceReview:
     windows: list[dict[str, Any]]
     episodes: list[dict[str, Any]]
     artifact_source: dict[str, Any] | None = None
+    max_tool_calls: int | None = None
+    evidence_tool_calls: int = field(default=0, init=False)
+    total_tool_calls: int = field(default=0, init=False)
+    budget_exhausted: bool = field(default=False, init=False)
     fields: dict[str, str] = field(init=False)
     artifact_catalog: list[dict[str, Any]] = field(init=False)
     reads: list[dict[str, Any]] = field(default_factory=list)
@@ -118,11 +141,12 @@ class TaxonomyEvidenceReview:
 
     def reset_runtime_state(self) -> None:
         """Discard partial receipts before restarting a failed judge transport."""
+        for call in self.tool_calls:
+            call["discarded_transport_attempt"] = True
         self.reads.clear()
         self.trace_reads.clear()
         self.resource_reads.clear()
         self.citations.clear()
-        self.tool_calls.clear()
         self.artifact_pins.clear()
         self.artifact_accesses.clear()
         self.artifact_reads.clear()
@@ -311,11 +335,13 @@ class TaxonomyEvidenceReview:
         for event in events[offset : offset + limit]:
             parts = event.get("parts") if isinstance(event.get("parts"), list) else []
             page.append(
-                {
-                    key: _portable(value)
-                    for key, value in event.items()
-                    if key != "parts"
-                }
+                _resource_summary(
+                    {
+                        key: value
+                        for key, value in event.items()
+                        if key != "parts"
+                    }
+                )
                 | {
                     "parts": [
                         {
@@ -340,6 +366,129 @@ class TaxonomyEvidenceReview:
                 "events": page,
             },
         )
+
+    def _trace_event_field(
+        self,
+        lane: str,
+        event_idx: int,
+        field: str,
+    ) -> tuple[dict[str, Any], str]:
+        from autofa import trace
+
+        if not isinstance(lane, str):
+            raise ValueError("lane must be text")
+        if type(event_idx) is not int or event_idx < 0:
+            raise ValueError("event_idx must be a non-negative integer")
+        if not isinstance(field, str) or not field or field == "parts":
+            raise ValueError("field must identify a non-part event field")
+        events = [
+            event
+            for event in trace.events(self._trace_source(), lane=lane)
+            if event.get("event_idx") == event_idx
+        ]
+        if len(events) != 1 or field not in events[0]:
+            raise ValueError("lane, event_idx, and field must identify exactly one event field")
+        value = events[0][field]
+        return events[0], value if isinstance(value, str) else _canonical(value)
+
+    def read_trace_event_field(
+        self,
+        lane: str,
+        event_idx: int,
+        field: str,
+        offset: int = 0,
+        limit: int = 12_000,
+    ) -> dict[str, Any]:
+        """Read one exact non-part field from a native execution event."""
+        if type(offset) is not int or offset < 0:
+            raise ValueError("offset must be a non-negative integer")
+        if type(limit) is not int or not 1 <= limit <= 20_000:
+            raise ValueError("limit must be an integer between 1 and 20000")
+        event, text = self._trace_event_field(lane, event_idx, field)
+        if offset > len(text):
+            raise ValueError("offset exceeds event field length")
+        end = min(len(text), offset + limit)
+        receipt = {
+            "kind": "event_field",
+            "lane": lane,
+            "event_idx": event_idx,
+            "field": field,
+            "start": offset,
+            "end": end,
+            "sha256": _sha256(text),
+        }
+        response = {
+            **receipt,
+            "role": event.get("role"),
+            "event_kind": event.get("kind"),
+            "text": text[offset:end],
+            "total_characters": len(text),
+            "next_offset": end if end < len(text) else None,
+        }
+        recorded = self._record(
+            "read_trace_event_field",
+            {
+                "lane": lane,
+                "event_idx": event_idx,
+                "field": field,
+                "offset": offset,
+                "limit": limit,
+            },
+            response,
+        )
+        self.trace_reads.append(receipt)
+        return recorded
+
+    def cite_trace_event_field(
+        self,
+        lane: str,
+        event_idx: int,
+        field: str,
+        quote: str,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Cite exact native event-field text already read."""
+        if not isinstance(quote, str) or not quote or len(quote) > 2_000:
+            raise ValueError("quote must contain between 1 and 2000 characters")
+        if type(offset) is not int or offset < 0:
+            raise ValueError("offset must be a non-negative integer")
+        _, text = self._trace_event_field(lane, event_idx, field)
+        start = text.find(quote, offset)
+        reads = [
+            item
+            for item in self.trace_reads
+            if item.get("kind") == "event_field"
+            and item["lane"] == lane
+            and item["event_idx"] == event_idx
+            and item["field"] == field
+        ]
+        if start < 0 or not _resource_ranges_cover(reads, start, start + len(quote)):
+            raise ValueError("exact event field quote was not read")
+        citation_id = f"cite-{len(self.citations) + 1}"
+        citation = {
+            "citation_id": citation_id,
+            "kind": "trace_event_field",
+            "lane": lane,
+            "event_idx": event_idx,
+            "field": field,
+            "start": start,
+            "end": start + len(quote),
+            "quote": quote,
+            "sha256": _sha256(text),
+        }
+        recorded = self._record(
+            "cite_trace_event_field",
+            {
+                "lane": lane,
+                "event_idx": event_idx,
+                "field": field,
+                "quote": quote,
+                "offset": offset,
+            },
+            citation,
+        )
+        self.citations[citation_id] = citation
+        return recorded
 
     def _trace_resource_rows(self, resource: str) -> list[dict[str, Any]]:
         from autofa import trace
@@ -1102,18 +1251,20 @@ class TaxonomyEvidenceReview:
             "transform_version": result.get("transform_version"),
             "source_identity": result.get("source_identity"),
         }
-        self.artifact_reads.append(receipt)
         response = {
             key: value
             for key, value in result.items()
             if key not in {"path", "download_path"}
         }
         response["receipt"] = receipt
-        return self._record(
+        recorded = self._record(
             "view_artifact",
             {"artifact_idx": artifact_idx, "page": page},
             response,
+            max_bytes=None,
         )
+        self.artifact_reads.append(receipt)
+        return recorded
 
     def cite_artifact(
         self,
@@ -1496,6 +1647,36 @@ class TaxonomyEvidenceReview:
                 self.list_trace_events,
             ),
             (
+                "read_trace_event_field",
+                "Read one exact non-part field from a native execution event.",
+                _schema(
+                    {
+                        "lane": string,
+                        "event_idx": integer,
+                        "field": string,
+                        "offset": integer,
+                        "limit": integer,
+                    },
+                    ["lane", "event_idx", "field"],
+                ),
+                self.read_trace_event_field,
+            ),
+            (
+                "cite_trace_event_field",
+                "Cite exact native event-field text already read.",
+                _schema(
+                    {
+                        "lane": string,
+                        "event_idx": integer,
+                        "field": string,
+                        "quote": string,
+                        "offset": integer,
+                    },
+                    ["lane", "event_idx", "field", "quote"],
+                ),
+                self.cite_trace_event_field,
+            ),
+            (
                 "read_trace_event_part",
                 "Read exact content from a standardized event part in any execution lane.",
                 _schema(
@@ -1741,7 +1922,9 @@ class TaxonomyEvidenceReview:
         callback: Callable[..., dict[str, Any]],
     ) -> Callable[..., dict[str, Any]]:
         def invoke(**arguments: Any) -> dict[str, Any]:
+            self.total_tool_calls += 1
             try:
+                self._charge_evidence_call(name)
                 return callback(**arguments)
             except Exception as exc:
                 self.tool_calls.append(
@@ -1755,6 +1938,18 @@ class TaxonomyEvidenceReview:
                 raise
 
         return invoke
+
+    def _charge_evidence_call(self, name: str) -> None:
+        if name in UNBUDGETED_TOOLS or self.max_tool_calls is None:
+            return
+        if self.evidence_tool_calls >= self.max_tool_calls:
+            self.budget_exhausted = True
+            raise EvidenceBudgetExhausted(
+                f"Evidence budget spent ({self.max_tool_calls} calls). Cite evidence "
+                "already read, then call update_review_status and submit_classification; "
+                "abstain if that evidence is insufficient."
+            )
+        self.evidence_tool_calls += 1
 
     def _field(self, name: str) -> str:
         try:
@@ -1780,12 +1975,21 @@ class TaxonomyEvidenceReview:
         name: str,
         arguments: dict[str, Any],
         result: dict[str, Any],
+        *,
+        max_bytes: int | None = MAX_AGENTIC_TOOL_RESULT_BYTES,
     ) -> dict[str, Any]:
+        rendered = _canonical(result)
+        result_bytes = len(rendered.encode())
+        if max_bytes is not None and result_bytes > max_bytes:
+            raise ValueError(
+                f"{name} result is {result_bytes} bytes; narrow the request with a "
+                "smaller limit or read one exact field"
+            )
         self.tool_calls.append(
             {
                 "name": name,
                 "arguments_sha256": _sha256(_canonical(arguments)),
-                "result_sha256": _sha256(_canonical(result)),
+                "result_sha256": _sha256(rendered),
                 "is_error": False,
             }
         )
@@ -1871,7 +2075,7 @@ class AgenticClassificationProvider:
     effort: str | None
     thinking: str | None
     thinking_budget_tokens: int | None
-    max_turns: int = 32
+    max_turns: int | None = 128
     runner: Callable[..., dict[str, Any]] | None = field(default=None, repr=False)
 
     @classmethod
@@ -1879,7 +2083,7 @@ class AgenticClassificationProvider:
         cls,
         cfg: Any,
         *,
-        max_turns: int,
+        max_turns: int | None,
         preflight: bool = True,
     ) -> AgenticClassificationProvider:
         settings = behavior_judge_settings(cfg)
@@ -2003,9 +2207,13 @@ class AgenticClassificationProvider:
                 "mode": mode,
                 "harness": self.harness,
                 "model": self.model,
-                "max_turns": self.max_turns if self.harness == "claude" else None,
+                "max_turns": self.max_turns,
                 "configured_max_turns": self.max_turns,
-                "tool_call_limit": self.max_turns if self.harness == "codex" else None,
+                "tool_call_limit": self.max_turns,
+                "evidence_tool_calls": review.evidence_tool_calls,
+                "total_tool_calls": review.total_tool_calls,
+                "budget_exhausted": review.budget_exhausted,
+                "tool_budget_semantics": AGENTIC_TOOL_BUDGET_SEMANTICS,
                 "session": session,
                 "tool_calls": review.tool_calls,
                 "citations": list(review.citations.values()),
@@ -2027,7 +2235,8 @@ class AgenticClassificationProvider:
             "thinking": self.thinking,
             "thinking_budget_tokens": self.thinking_budget_tokens,
             "configured_max_turns": self.max_turns,
-            "tool_call_limit": self.max_turns if self.harness == "codex" else None,
+            "tool_call_limit": self.max_turns,
+            "tool_budget_semantics": AGENTIC_TOOL_BUDGET_SEMANTICS,
         }
 
     def configuration_sha256(self) -> str:
@@ -2069,15 +2278,15 @@ async def _run_restricted_session_async(
     effort: str | None,
     thinking: str | None,
     thinking_budget_tokens: int | None,
-    max_turns: int,
+    max_turns: int | None,
     mode: str = "review",
 ) -> dict[str, Any]:
     directory = autofa_home() / "cache" / "taxonomy-agentic"
     directory.mkdir(parents=True, exist_ok=True)
+    review.max_tool_calls = max_turns
     if harness == "codex":
         from autofa.harness.codex_app_server import CodexAppServerError
 
-        remaining_turns = max_turns
         cumulative_usage: Counter[str] = Counter()
         for attempt in range(CODEX_TRANSPORT_ATTEMPTS):
             try:
@@ -2088,7 +2297,6 @@ async def _run_restricted_session_async(
                     model=model,
                     cli_path=cli_path,
                     effort=effort,
-                    max_turns=remaining_turns,
                     directory=directory,
                     mode=mode,
                 )
@@ -2099,10 +2307,9 @@ async def _run_restricted_session_async(
                 return session
             except CodexAppServerError as exc:
                 cumulative_usage.update(exc.usage)
-                remaining_turns -= len(review.tool_calls)
                 if not exc.retryable or attempt + 1 == CODEX_TRANSPORT_ATTEMPTS:
                     raise
-                if remaining_turns <= 0:
+                if max_turns is not None and review.evidence_tool_calls >= max_turns:
                     raise RuntimeError(
                         "Codex transport failed after exhausting the taxonomy tool budget"
                     ) from exc
@@ -2118,7 +2325,6 @@ async def _run_restricted_session_async(
         effort=effort,
         thinking=thinking,
         thinking_budget_tokens=thinking_budget_tokens,
-        max_turns=max_turns,
         directory=directory,
         mode=mode,
     )
@@ -2147,7 +2353,6 @@ async def _run_codex(
     model: str,
     cli_path: str | None,
     effort: str | None,
-    max_turns: int,
     directory: Path,
     mode: str = "review",
 ) -> dict[str, Any]:
@@ -2191,7 +2396,6 @@ async def _run_codex(
         call_tool=call_tool,
         restricted=True,
         timeout_s=AGENTIC_SESSION_TIMEOUT_SECONDS,
-        max_tool_calls=max_turns,
     )
     if (result.status != "completed" or result.error) and review.submission is None:
         if getattr(result, "retryable", False):
@@ -2230,7 +2434,6 @@ async def _run_claude(
     effort: str | None,
     thinking: str | None,
     thinking_budget_tokens: int | None,
-    max_turns: int,
     directory: Path,
     mode: str = "review",
 ) -> dict[str, Any]:
@@ -2288,7 +2491,6 @@ async def _run_claude(
         strict_mcp_config=True,
         permission_mode="bypassPermissions",
         setting_sources=[],
-        max_turns=max_turns,
         max_buffer_size=CLAUDE_MAX_BUFFER_SIZE,
         cli_path=cli_path,
     )

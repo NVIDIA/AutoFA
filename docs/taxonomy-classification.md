@@ -137,8 +137,11 @@ justifies the extra cost. These are recommendations, not restrictions.
   filesystem access and cannot change anything. As a reviewer, it starts from the
   first-pass answer, checks the cited events, and searches wider only when
   those events neither confirm nor contradict the answer.
-  `--agentic-max-turns N` limits Claude turns or Codex evidence-tool calls per
-  pass (32 by default). Both harnesses also have a 10-minute session timeout.
+  `--agentic-max-turns N` limits investigation-tool calls that can reveal new
+  evidence or taxonomy information for both harnesses (128 by default).
+  Citation, review-status, and submission calls do not count.
+  `--agentic-max-turns none` removes the limit. Both harnesses also have a
+  10-minute session timeout.
 
 A second pass can confirm, change, or withdraw the first-pass answer. Each
 rollout still ends with exactly one failure mode. On long traces, the reviewer
