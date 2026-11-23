@@ -1,4 +1,4 @@
-# Run AutoFA on the bundled rollouts
+# Tutorial: explore and run AutoFA on bundled rollouts
 
 These archives contain example rollouts, so you can test AutoFA without running
 evaluations yourself. Each config reproduces the updated setup: up to 1,362
@@ -7,9 +7,23 @@ commands from the repository root.
 
 ## Example reports
 
-To inspect results without running AutoFA, download and open the self-contained
-[Inkling](example_reports/inkling.html), [GLM](example_reports/glm.html), and
-[Super](example_reports/super.html) reports.
+Download any self-contained report and open the HTML file locally:
+
+- [Download the Inkling report](https://github.com/NVIDIA/AutoFA/raw/refs/heads/main/eval_data/example_reports/inkling.html)
+- [Download the GLM report](https://github.com/NVIDIA/AutoFA/raw/refs/heads/main/eval_data/example_reports/glm.html)
+- [Download the Super report](https://github.com/NVIDIA/AutoFA/raw/refs/heads/main/eval_data/example_reports/super.html)
+
+### What the report looks like
+
+![AutoFA report overview with benchmark outcomes and failure-mode distributions](example_reports/inkling.png)
+
+The Inkling overview summarizes benchmark outcomes and shows how diagnosed failures are
+distributed across the taxonomy.
+
+![AutoFA failure detail with the localized event, judge rationale and causal chain](img/failure-evidence.png)
+
+The Super failure detail shows the localized critical event, supporting evidence, judge
+rationale, causal chain and recommended disposition.
 
 ### Interpreting the reports
 
