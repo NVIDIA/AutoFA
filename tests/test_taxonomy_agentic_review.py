@@ -536,6 +536,44 @@ def test_spent_evidence_budget_still_allows_citation_and_submission() -> None:
     ]
 
 
+def test_unlimited_review_still_counts_investigation_calls() -> None:
+    review = _review()
+    tools = {name: fn for name, _description, _schema, fn in review.specs()}
+
+    tools["evidence_overview"]()
+    tools["read_evidence"](field="incident", limit=20_000)
+    tools["cite_evidence"](field="incident", quote="unique evidence")
+
+    assert review.max_tool_calls is None
+    assert review.evidence_tool_calls == 2
+    assert review.total_tool_calls == 3
+
+
+def test_budget_spent_before_any_read_still_allows_insufficient_evidence_abstention() -> None:
+    review = _review()
+    review.max_tool_calls = 1
+    tools = {name: fn for name, _description, _schema, fn in review.specs()}
+
+    tools["evidence_overview"]()
+    with pytest.raises(agentic_review.EvidenceBudgetExhausted):
+        tools["read_evidence"](field="incident")
+    tools["update_review_status"](
+        task_context_checked=True, outcome_checked=True, recovery_checked=True,
+        counterevidence_checked=True, candidate_leaves=[agentic_review.NO_FAILURE_CODE],
+    )
+    submit = {
+        "selected_code": agentic_review.NO_FAILURE_CODE,
+        "rationale": "The budget ran out before any evidence could be read.",
+        "diagnosis": _diagnosis(),
+        "citation_ids": [],
+    }
+    with pytest.raises(ValueError, match="requires inspected evidence"):
+        tools["submit_classification"](**submit, abstention_reason="missing_observability")
+    tools["submit_classification"](**submit, abstention_reason="insufficient_evidence")
+
+    assert review.submission["selected_code"] == agentic_review.NO_FAILURE_CODE
+
+
 def _claude(monkeypatch, tmp_path, review, *, query, tool, options, result) -> dict:
     import claude_agent_sdk  # Imported lazily: the SDK is slow to import.
 

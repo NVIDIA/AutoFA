@@ -1466,6 +1466,7 @@ class TaxonomyEvidenceReview:
                 or self.trace_reads
                 or self.resource_reads
                 or self.artifact_accesses
+                or (self.budget_exhausted and abstention_reason == "insufficient_evidence")
             ):
                 raise ValueError(
                     "no_supported_failure requires inspected evidence or an unavailable "
@@ -1961,9 +1962,9 @@ class TaxonomyEvidenceReview:
         return invoke
 
     def _charge_evidence_call(self, name: str) -> None:
-        if name in UNBUDGETED_TOOLS or self.max_tool_calls is None:
+        if name in UNBUDGETED_TOOLS:
             return
-        if self.evidence_tool_calls >= self.max_tool_calls:
+        if self.max_tool_calls is not None and self.evidence_tool_calls >= self.max_tool_calls:
             self.budget_exhausted = True
             raise EvidenceBudgetExhausted(
                 f"Evidence budget spent ({self.max_tool_calls} calls). Cite evidence "
