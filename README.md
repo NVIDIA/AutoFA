@@ -59,8 +59,9 @@ category, and let discovery surface mechanisms that no taxonomy anticipated.
 
 ## Quick start
 
-Want to try AutoFA but do not have evaluation logs? The repository includes three
-example LiveCodeBench runs for Inkling, GLM and Super. Follow the
+Want to try AutoFA but do not have evaluation logs? The repository includes three example
+LiveCodeBench runs for `thinkingmachines/Inkling-Small`, `zai-org/GLM-5.3-Flash` and
+`nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16`. Follow the
 [example reports and bundled-data tutorial](eval_data/README.md) to browse their
 ready-made analyses without running AutoFA, or run AutoFA yourself on the included
 rollout archives.
