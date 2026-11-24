@@ -138,8 +138,8 @@ judge_model = "openai/openai/gpt-6-luna"
 # Taxonomy classification workflow.
 taxonomy_first_pass = "llm"
 taxonomy_second_pass = "llm"
-# Per-pass bound: Claude model turns or Codex evidence-tool calls.
-taxonomy_agentic_max_turns = 32
+# Per-pass bound on investigation-tool calls for either Judge harness.
+taxonomy_agentic_max_turns = 128
 # auto prefers Decisions for fixed-label calls when this endpoint/model supports it.
 # Free text uses Responses, with Chat fallback for servers without Responses.
 # Explicit overrides: responses | decisions (required for labels) | chat_completions.

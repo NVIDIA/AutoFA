@@ -180,8 +180,8 @@ def validate_taxonomy_second_pass(value: str) -> str:
 
 
 def validate_taxonomy_agentic_max_turns(value: int) -> int:
-    if type(value) is not int or not 1 <= value <= 128:
-        raise ValueError("taxonomy_agentic_max_turns must be an integer between 1 and 128")
+    if type(value) is not int or value < 1:
+        raise ValueError("taxonomy_agentic_max_turns must be a positive integer")
     return value
 
 

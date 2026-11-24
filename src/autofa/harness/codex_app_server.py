@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -55,7 +56,11 @@ _TRANSIENT_ERRORS = {
     "transportClosed",
     "requestTimeout",
     "remoteCompactionFailed",
+    "stateInitializationFailed",
 }
+
+_STATE_INITIALIZATION_ERROR = "failed to initialize sqlite state runtime"
+_STDERR_LIMIT_BYTES = 64 * 1024
 
 
 def _error_details(error: Any, *, model: str | None = None) -> tuple[str, str, bool]:
@@ -76,6 +81,8 @@ def _error_details(error: Any, *, model: str | None = None) -> tuple[str, str, b
     explanation = " ".join(str(error.get(key) or "") for key in (
         "code", "message", "additionalDetails", "data",
     ))
+    if _STATE_INITIALIZATION_ERROR in explanation.lower():
+        code = "stateInitializationFailed"
     if is_model_access_error(explanation):
         return "modelAccessDenied", model_access_message("Codex", model), False
     if status == 403:
@@ -108,11 +115,13 @@ def _error_details(error: Any, *, model: str | None = None) -> tuple[str, str, b
         "-32600": "Codex rejected the request. Check your Codex configuration and CLI version.",
         "-32601": "Codex does not support this operation. Update the Codex CLI.",
         "-32602": "Codex rejected an option. Update the Codex CLI and check model settings.",
+        "-32603": "Codex app-server reported an internal error.",
         "sandboxError": "Codex could not run in its sandbox. Check your Codex installation.",
         "transportClosed": "Codex app-server exited before completing the turn.",
         "requestTimeout": "Codex app-server did not respond in time.",
         "remoteCompactionFailed": "Codex remote compaction failed before completion.",
         "responseStreamDisconnected": "Codex response stream disconnected before completion.",
+        "stateInitializationFailed": "Codex could not initialize its local state.",
         "toolCallLimitExceeded": "Codex exceeded this session's tool-call limit.",
         "restrictedToolsUnsupported": (
             "This Codex CLI cannot isolate judge tools. Update Codex before running judging."
@@ -121,7 +130,16 @@ def _error_details(error: Any, *, model: str | None = None) -> tuple[str, str, b
         "threadBusy": "Codex is running this thread. Wait for it to finish before compacting.",
     }
     retryable = code in _TRANSIENT_ERRORS and status not in (400, 404, 422)
-    return code, messages.get(code, f"Codex turn failed ({code})."), retryable
+    message = messages.get(code, f"Codex turn failed ({code}).")
+    diagnostics = []
+    if code in {"stateInitializationFailed", "transportClosed"}:
+        if type(error.get("returnCode")) is int:
+            diagnostics.append(f"exit code {error['returnCode']}")
+        if isinstance(error.get("readerError"), str):
+            diagnostics.append(f"reader error {error['readerError']}")
+    if diagnostics:
+        message = f"{message.removesuffix('.')} ({'; '.join(diagnostics)})."
+    return code, message, retryable
 
 
 class CodexAppServerError(RuntimeError):
@@ -148,6 +166,7 @@ _BASE_CONFIG: dict[str, Any] = {
     "features.skip_host_skill_discovery": True,
     "features.code_mode": False,
     "features.code_mode_only": False,
+    "features.unified_exec": False,
     "features.tool_suggest": False,
     "features.image_generation": False,
     "features.browser_use": False,
@@ -183,14 +202,18 @@ class CodexAppServer:
         on_request: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
         on_notification: EventCallback | None = None,
         request_timeout_s: float = 30.0,
+        isolated_state: bool = False,
     ) -> None:
         self.cli_path = cli_path
         self.cwd = cwd
         self.on_request = on_request
         self.on_notification = on_notification
         self.request_timeout_s = request_timeout_s
+        self.isolated_state = isolated_state
         self.process: asyncio.subprocess.Process | None = None
         self._reader: asyncio.Task[None] | None = None
+        self._stderr_reader: asyncio.Task[None] | None = None
+        self._stderr = bytearray()
         self._notifier: asyncio.Task[None] | None = None
         self._requests: set[asyncio.Task[None]] = set()
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
@@ -204,6 +227,7 @@ class CodexAppServer:
         self._sequence = 0
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
+        self._state_directory: tempfile.TemporaryDirectory[str] | None = None
         self.active_turns: dict[str, str] = {}
 
     async def __aenter__(self) -> CodexAppServer:
@@ -211,16 +235,27 @@ class CodexAppServer:
         args = [binary, "app-server", "--listen", "stdio://"]
         for key, value in _BASE_CONFIG.items():
             args.extend(["-c", f"{key}={json.dumps(value)}"])
-        self.process = await asyncio.create_subprocess_exec(
-            *args,
-            cwd=self.cwd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            # Evidence images and complete assistant items can be large.
-            limit=16 * 1024 * 1024,
-        )
+        if self.isolated_state:
+            self._state_directory = tempfile.TemporaryDirectory(
+                prefix=".codex-state-",
+                dir=self.cwd,
+            )
+            args.extend(["-c", f"sqlite_home={json.dumps(self._state_directory.name)}"])
+        try:
+            self.process = await asyncio.create_subprocess_exec(
+                *args,
+                cwd=self.cwd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                # Evidence images and complete assistant items can be large.
+                limit=16 * 1024 * 1024,
+            )
+        except BaseException:
+            self._cleanup_state_directory()
+            raise
         self._reader = asyncio.create_task(self._read_messages())
+        self._stderr_reader = asyncio.create_task(self._read_stderr())
         self._notifier = asyncio.create_task(self._notify())
         try:
             await self.request(
@@ -276,6 +311,7 @@ class CodexAppServer:
     async def _read_messages(self) -> None:
         assert self.process is not None and self.process.stdout is not None
         failure: Exception = CodexAppServerError({"code": "transportClosed"})
+        reader_error: Exception | None = None
         try:
             while line := await self.process.stdout.readline():
                 message = json.loads(line)
@@ -318,15 +354,45 @@ class CodexAppServer:
                         future.set_exception(CodexAppServerError({"code": "invalidResponse"}))
         except asyncio.CancelledError:
             raise
-        except Exception:
-            failure = CodexAppServerError({"code": "transportClosed"})
+        except Exception as exc:
+            reader_error = exc
         finally:
+            if reader_error is not None or not self._closed:
+                failure = await self._transport_failure(reader_error)
             for future in self._pending.values():
                 if not future.done():
                     future.set_exception(failure)
             if not self._closed:
                 # Preserve the ordering of a final turn/completed before EOF.
                 await self._notifications.put(failure)
+
+    async def _read_stderr(self) -> None:
+        assert self.process is not None and self.process.stderr is not None
+        while chunk := await self.process.stderr.read(8192):
+            self._stderr.extend(chunk)
+            if len(self._stderr) > _STDERR_LIMIT_BYTES:
+                del self._stderr[:-_STDERR_LIMIT_BYTES]
+
+    async def _transport_failure(self, reader_error: Exception | None) -> CodexAppServerError:
+        process = self.process
+        if process is not None and process.returncode is None:
+            with suppress(TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=0.2)
+        if self._stderr_reader is not None:
+            await asyncio.wait({self._stderr_reader}, timeout=0.2)
+        stderr = self._stderr.decode(errors="replace")
+        error = {
+            "code": (
+                "stateInitializationFailed"
+                if _STATE_INITIALIZATION_ERROR in stderr.lower()
+                else "transportClosed"
+            ),
+        }
+        if process is not None and process.returncode is not None:
+            error["returnCode"] = process.returncode
+        if reader_error is not None:
+            error["readerError"] = type(reader_error).__name__
+        return CodexAppServerError(error)
 
     async def _notify(self) -> None:
         """Preserve notification/tool ordering without blocking the RPC reader."""
@@ -439,6 +505,15 @@ class CodexAppServer:
                 with suppress(ProcessLookupError):
                     process.kill()
                 await process.wait()
+        if self._stderr_reader is not None:
+            self._stderr_reader.cancel()
+            await asyncio.gather(self._stderr_reader, return_exceptions=True)
+        self._cleanup_state_directory()
+
+    def _cleanup_state_directory(self) -> None:
+        state_directory, self._state_directory = self._state_directory, None
+        if state_directory is not None:
+            state_directory.cleanup()
 
     async def drain_requests(self) -> None:
         """Finish cancelled tool cleanup before another turn can use its runtime."""
@@ -494,6 +569,7 @@ class CodexTurnConnection:
             if self.client is None:
                 self.client = CodexAppServer(
                     cli_path, cwd=cwd, on_request=on_request, on_notification=on_notification,
+                    isolated_state=True,
                 )
                 self._signature = signature
                 await self.client.__aenter__()
@@ -668,14 +744,26 @@ async def run_codex_turn(  # noqa: C901
             await on_event(method, params)
 
     directory = str(Path(cwd).resolve())
-    transport = (connection.use(
-        cli_path=cli_path, cwd=directory, on_request=dispatch, on_notification=forward_event,
-        signature=json.dumps(
-            [cli_path, directory, model, system_prompt, specs, effort], sort_keys=True,
-        ),
-    ) if connection is not None else CodexAppServer(
-        cli_path, cwd=directory, on_request=dispatch, on_notification=forward_event,
-    ))
+    transport = (
+        connection.use(
+            cli_path=cli_path,
+            cwd=directory,
+            on_request=dispatch,
+            on_notification=forward_event,
+            signature=json.dumps(
+                [cli_path, directory, model, system_prompt, specs, effort],
+                sort_keys=True,
+            ),
+        )
+        if connection is not None
+        else CodexAppServer(
+            cli_path,
+            cwd=directory,
+            on_request=dispatch,
+            on_notification=forward_event,
+            isolated_state=restricted and resume is None,
+        )
+    )
     async with paid_async_dispatch(accounting.context), transport as client:
 
         async def interrupt() -> None:

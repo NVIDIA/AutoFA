@@ -648,21 +648,35 @@ def menu(monkeypatch, *choices):
 
 
 def test_taxonomy_settings_share_workflow_and_agentic_limit(monkeypatch) -> None:
-    menu(monkeypatch, "workflow", ("agentic", "llm"), "turns", 16, MENU_BACK)
+    menu(monkeypatch, "workflow", ("agentic", "llm"), "turns", 64, MENU_BACK)
     saved = []
 
     result = taxonomy_settings.configure_taxonomy(Config(), save=saved.append)
 
     assert (result.taxonomy_first_pass, result.taxonomy_second_pass) == ("agentic", "llm")
-    assert result.taxonomy_agentic_max_turns == 16
+    assert result.taxonomy_agentic_max_turns == 64
     assert saved[-1] == result
+
+
+def test_agentic_limit_menu_preserves_saved_value(monkeypatch) -> None:
+    captured = {}
+
+    def choose(_title, options, **kwargs):
+        captured["values"] = [option.value for option in options]
+        captured["default_index"] = kwargs["default_index"]
+        return MENU_BACK
+
+    monkeypatch.setattr(taxonomy_settings, "select_option", choose)
+
+    assert taxonomy_settings.select_agentic_max_turns(32) is None
+    assert captured["values"][captured["default_index"]] == 32
 
 
 def test_taxonomy_settings_are_validated_before_saving(monkeypatch) -> None:
     saved = []
     monkeypatch.setattr(settings, "_save_fields", lambda cfg, fields: saved.append((cfg, fields)))
 
-    with pytest.raises(ValueError, match="between 1 and 128"):
+    with pytest.raises(ValueError, match="positive integer"):
         settings.save_taxonomy_settings(Config(taxonomy_agentic_max_turns=0))
 
     assert saved == []

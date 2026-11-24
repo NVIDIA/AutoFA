@@ -16,6 +16,7 @@ import pytest
 
 from autofa.harness.claude_transport import CLAUDE_MAX_BUFFER_SIZE
 from autofa.harness.codex_app_server import CodexAppServerError
+from autofa.metrics.claude_judge import _evidence_tool_result
 from autofa.taxonomy import agentic_review
 from autofa.taxonomy.agentic_review import (
     AgenticClassificationProvider,
@@ -91,9 +92,10 @@ def test_agentic_tools_are_taxonomy_only_and_require_read_citations() -> None:
 
     assert {spec[0] for spec in review.specs()} == {
         "evidence_overview", "read_evidence", "search_evidence", "cite_evidence",
-        "trace_overview", "list_trace_events", "read_trace_event_part",
-        "cite_trace_event_part", "list_trace_resource", "read_trace_resource_field",
-        "cite_trace_resource", "read_trace_step", "search_trace",
+        "trace_overview", "list_trace_events", "read_trace_event_field",
+        "cite_trace_event_field", "read_trace_event_part", "cite_trace_event_part",
+        "list_trace_resource", "read_trace_resource_field", "cite_trace_resource",
+        "read_trace_step", "search_trace",
         "trace_context", "cite_trace", "list_artifacts", "inspect_artifact", "read_artifact",
         "view_artifact", "cite_artifact", "search_taxonomy", "update_review_status",
         "review_status", "submit_classification",
@@ -163,10 +165,17 @@ def test_agentic_trace_tools_reuse_normalized_evalrdl_navigation() -> None:
     assert read["text"] == "wrong branch"
     citation = review.cite_trace(2, "reasoning", "wrong branch")
     assert citation["source_event"]["event_idx"] == 1
-    event_citation = review.cite_trace_event_part(
-        "worker", 1, 0, "text", "auxiliary fact"
-    )
+    event_citation = review.cite_trace_event_part("worker", 1, 0, "auxiliary fact")
     assert event_citation["lane"] == "worker"
+    assert event_citation["field"] == "text"
+    event_field = review.read_trace_event_field("worker", 1, "kind")
+    assert event_field["text"] == "message"
+    with pytest.raises(ValueError, match="available: event_idx, lane, kind, role"):
+        review.read_trace_event_field("worker", 1, "tool_calls")
+    field_citation = review.cite_trace_event_field(
+        "worker", 1, "kind", "message"
+    )
+    assert field_citation["kind"] == "trace_event_field"
     assert review.list_trace_resource("prompt_messages")["total"] == 1
     nested = review.list_trace_resource("prompt_summaries")["rows"][0]["kept"]
     assert nested["truncated"] is True
@@ -179,6 +188,64 @@ def test_agentic_trace_tools_reuse_normalized_evalrdl_navigation() -> None:
         "prompt_messages", 0, "msg_json", "exact prompt"
     )
     assert resource_citation["resource"] == "prompt_messages"
+
+
+def test_list_trace_events_summarizes_large_nested_event_fields() -> None:
+    source = {"trace": {
+        "execution": {
+            "rollout": {"run_id": "run", "task_id": "task", "repeat": 0},
+            "events": [{
+                "event_idx": 0,
+                "lane": "",
+                "kind": "model_call",
+                "event_text": {"request_messages": "x" * 5_000_000},
+                "parts": [],
+            }],
+            "artifacts": [],
+        },
+        "steps": [],
+    }}
+
+    review = _review(artifact_source=source)
+    event = review.list_trace_events()["events"][0]
+
+    assert event["event_text"]["truncated"] is True
+    assert event["event_text"]["characters"] > 5_000_000
+    assert len(event["event_text"]["preview"]) == 500
+    exact = review.read_trace_event_field("", 0, "event_text", limit=20_000)
+    assert exact["text"].startswith('{"request_messages":"')
+    assert exact["next_offset"] == 20_000
+
+
+def test_agentic_tool_results_fail_closed_before_transport_overflow() -> None:
+    review = _review()
+
+    with pytest.raises(ValueError, match="narrow the request"):
+        review._record(
+            "oversized_test",
+            {},
+            {"value": "x" * (agentic_review.MAX_AGENTIC_TOOL_RESULT_BYTES + 1)},
+        )
+
+    assert review.tool_calls == []
+
+
+def test_malformed_tool_arguments_explain_signature_without_spending_budget() -> None:
+    review = _review()
+    review.max_tool_calls = 1
+    tools = {name: callback for name, _, _, callback in review.specs()}
+
+    with pytest.raises(
+        agentic_review.ToolArgumentError, match="accepted arguments: field, offset, limit"
+    ):
+        tools["read_evidence"](field="incident", kind="text")
+
+    assert review.evidence_tool_calls == 0
+    assert review.budget_exhausted is False
+    assert review.tool_calls[-1]["error_type"] == "ToolArgumentError"
+    assert review.tool_calls[-1]["argument_names"] == ["field", "kind"]
+    with pytest.raises(ValueError, match="query must be text"):
+        tools["search_taxonomy"](query=None)
 
 
 def test_agentic_artifact_tools_read_view_and_cite_verified_evidence(monkeypatch) -> None:
@@ -222,6 +289,9 @@ def test_agentic_artifact_tools_read_view_and_cite_verified_evidence(monkeypatch
     read = review.read_artifact(2, "page:1")
     assert read["text"] == "exact verifier failure"
     text_citation = review.cite_artifact(2, "page:1", quote="verifier failure")
+    image = b"i" * (agentic_review.MAX_AGENTIC_TOOL_RESULT_BYTES + 1)
+    image_sha = hashlib.sha256(image).hexdigest()
+    monkeypatch.setattr("autofa.trace.artifact_image", rendered(image_sha))
     viewed = review.view_artifact(2)
     assert viewed["receipt"]["sha256"] == image_sha
     image_citation = review.cite_artifact(2, "page:1")
@@ -270,7 +340,7 @@ def _codex(monkeypatch, tmp_path, review, run_codex_turn, **kwargs) -> dict:
     monkeypatch.setattr("autofa.harness.codex_app_server.run_codex_turn", run_codex_turn)
     return asyncio.run(agentic_review._run_codex(
         prompt="review", system_prompt="system", review=review, model="judge-model",
-        cli_path="codex", effort="medium", max_turns=12, directory=tmp_path, **kwargs,
+        cli_path="codex", effort="medium", directory=tmp_path, **kwargs,
     ))
 
 
@@ -311,7 +381,7 @@ def test_codex_review_uses_the_configured_agentic_budget(monkeypatch, tmp_path) 
     result = _codex(monkeypatch, tmp_path, review, run_codex_turn)
 
     assert result["status"] == "completed"
-    assert captured["max_tool_calls"] == 12
+    assert captured.get("max_tool_calls") is None
     assert captured["timeout_s"] == agentic_review.AGENTIC_SESSION_TIMEOUT_SECONDS
     assert tool_threads and tool_threads[0] is not threading.main_thread()
 
@@ -352,26 +422,29 @@ def test_codex_promotes_retryable_turn_failure(monkeypatch, tmp_path) -> None:
     assert caught.value.retryable
 
 
+@pytest.mark.parametrize("max_turns", [12, None])
 def test_restricted_codex_session_restarts_with_clean_receipts(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, max_turns
 ) -> None:
     review = _review()
     attempts = 0
-    budgets = []
 
     async def flaky_codex(**kwargs):
         nonlocal attempts
         attempts += 1
-        budgets.append(kwargs["max_turns"])
         active_review = kwargs["review"]
         if attempts == 1:
             active_review.trace_reads.append({"kind": "partial"})
             active_review.tool_calls.append({"name": "partial"})
+            active_review.evidence_tool_calls += 1
             error = CodexAppServerError({"code": "transportClosed"})
             error.usage = {"input_tokens": 5}
             raise error
         assert active_review.trace_reads == []
-        assert active_review.tool_calls == []
+        assert active_review.tool_calls == [{
+            "name": "partial",
+            "discarded_transport_attempt": True,
+        }]
         return {
             "session_id": "session",
             "status": "completed",
@@ -392,11 +465,12 @@ def test_restricted_codex_session_restarts_with_clean_receipts(
         effort="medium",
         thinking=None,
         thinking_budget_tokens=None,
-        max_turns=12,
+        max_turns=max_turns,
     ))
 
     assert attempts == 2
-    assert budgets == [12, 11]
+    assert review.max_tool_calls == max_turns
+    assert review.evidence_tool_calls == 1
     assert result["usage"] == {"input_tokens": 12}
     assert result["transport_attempts"] == 2
     assert result["transport_restarts"] == 1
@@ -411,7 +485,7 @@ def test_codex_transport_retry_cannot_reset_exhausted_tool_budget(
     async def failed_codex(**kwargs):
         nonlocal attempts
         attempts += 1
-        kwargs["review"].tool_calls.append({"name": "spent"})
+        kwargs["review"].evidence_tool_calls += 1
         raise CodexAppServerError({"code": "transportClosed"})
 
     monkeypatch.setattr(agentic_review, "_run_codex", failed_codex)
@@ -434,6 +508,72 @@ def test_codex_transport_retry_cannot_reset_exhausted_tool_budget(
     assert attempts == 1
 
 
+def test_spent_evidence_budget_still_allows_citation_and_submission() -> None:
+    review = _review()
+    review.max_tool_calls = 1
+    tools = {name: fn for name, _description, _schema, fn in review.specs()}
+
+    tools["read_evidence"](field="incident", limit=20_000)
+    refused = _evidence_tool_result("search_taxonomy", tools["search_taxonomy"], {})
+    citation = tools["cite_evidence"](field="incident", quote="unique evidence")
+    tools["update_review_status"](
+        task_context_checked=True, outcome_checked=True, recovery_checked=True,
+        counterevidence_checked=True, candidate_leaves=["D.1"],
+    )
+    tools["submit_classification"](
+        selected_code="D.1", rationale="Supported.", diagnosis=_diagnosis(),
+        citation_ids=[citation["citation_id"]],
+    )
+
+    assert refused["isError"]
+    assert "Evidence budget spent (1 calls)" in refused["content"][0]["text"]
+    assert review.submission["selected_code"] == "D.1"
+    assert review.evidence_tool_calls == 1
+    assert review.total_tool_calls == 5
+    assert review.budget_exhausted
+    assert [call.get("error_type") for call in review.tool_calls] == [
+        None, "EvidenceBudgetExhausted", None, None, None,
+    ]
+
+
+def test_unlimited_review_still_counts_investigation_calls() -> None:
+    review = _review()
+    tools = {name: fn for name, _description, _schema, fn in review.specs()}
+
+    tools["evidence_overview"]()
+    tools["read_evidence"](field="incident", limit=20_000)
+    tools["cite_evidence"](field="incident", quote="unique evidence")
+
+    assert review.max_tool_calls is None
+    assert review.evidence_tool_calls == 2
+    assert review.total_tool_calls == 3
+
+
+def test_budget_spent_before_any_read_still_allows_insufficient_evidence_abstention() -> None:
+    review = _review()
+    review.max_tool_calls = 1
+    tools = {name: fn for name, _description, _schema, fn in review.specs()}
+
+    tools["evidence_overview"]()
+    with pytest.raises(agentic_review.EvidenceBudgetExhausted):
+        tools["read_evidence"](field="incident")
+    tools["update_review_status"](
+        task_context_checked=True, outcome_checked=True, recovery_checked=True,
+        counterevidence_checked=True, candidate_leaves=[agentic_review.NO_FAILURE_CODE],
+    )
+    submit = {
+        "selected_code": agentic_review.NO_FAILURE_CODE,
+        "rationale": "The budget ran out before any evidence could be read.",
+        "diagnosis": _diagnosis(),
+        "citation_ids": [],
+    }
+    with pytest.raises(ValueError, match="requires inspected evidence"):
+        tools["submit_classification"](**submit, abstention_reason="missing_observability")
+    tools["submit_classification"](**submit, abstention_reason="insufficient_evidence")
+
+    assert review.submission["selected_code"] == agentic_review.NO_FAILURE_CODE
+
+
 def _claude(monkeypatch, tmp_path, review, *, query, tool, options, result) -> dict:
     import claude_agent_sdk  # Imported lazily: the SDK is slow to import.
 
@@ -446,7 +586,7 @@ def _claude(monkeypatch, tmp_path, review, *, query, tool, options, result) -> d
     return asyncio.run(agentic_review._run_claude(
         prompt="review", system_prompt="system", review=review, model="judge-model",
         cli_path="claude", effort="medium", thinking=None, thinking_budget_tokens=None,
-        max_turns=12, directory=tmp_path,
+        directory=tmp_path,
     ))
 
 
@@ -486,6 +626,7 @@ def test_claude_tools_run_outside_the_event_loop(monkeypatch, tmp_path) -> None:
                      result=Result)
 
     assert result["status"] == "success"
+    assert "max_turns" not in captured
     assert captured["max_buffer_size"] == CLAUDE_MAX_BUFFER_SIZE
     assert tool_threads and tool_threads[0] is not threading.main_thread()
 
@@ -550,6 +691,9 @@ def test_agentic_provider_returns_harness_and_tool_receipts() -> None:
     assert result["selected_code"] == "D.1"
     assert result["usage"] == {"input_tokens": 10}
     assert result["receipts"]["harness"] == "codex"
+    assert result["receipts"]["tool_budget_semantics"] == "investigation_calls_v1"
+    assert result["receipts"]["total_tool_calls"] == 0
+    assert result["receipts"]["budget_exhausted"] is False
     assert len(result["receipts"]["citations"]) == 1
 
 

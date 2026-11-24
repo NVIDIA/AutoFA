@@ -542,6 +542,13 @@ def _second_pass_receipts(row: dict[str, Any]) -> dict[str, Any]:
     return dict(receipts) if isinstance(receipts, dict) else {}
 
 
+def _agentic_review_limit(receipts: dict[str, Any]) -> str | None:
+    limit = receipts.get("max_turns")
+    if receipts.get("tool_budget_semantics") == "investigation_calls_v1":
+        return "unlimited" if limit is None else f"{limit} tool calls"
+    return f"{limit} turns" if limit is not None else None
+
+
 _MODEL_NAME_CASING = {
     "gpt": "GPT",
     "deepseek": "DeepSeek",
@@ -843,7 +850,7 @@ def _compact_record(row: dict[str, Any]) -> dict[str, Any]:
                 else None
             )
         ),
-        "second_pass_max_turns": second_pass_receipts.get("max_turns"),
+        "second_pass_max_turns": _agentic_review_limit(second_pass_receipts),
         "judge_configuration": _judge_configuration(row),
         "judge_rationale": judge_trace.get("rationale"),
         "first_pass": first_pass,
@@ -1308,7 +1315,7 @@ function configSettings(j){
   if(j.second_pass.length)parts.push(`second pass ${j.second_pass.map(words).join(', ')}`);
   if(j.second_pass_harnesses.length)parts.push(`review harness ${j.second_pass_harnesses.map(words).join(', ')}`);
   if(j.second_pass_models.length)parts.push(`review model ${j.second_pass_models.join(', ')}`);
-  if(j.second_pass_max_turns.length)parts.push(`review limit ${j.second_pass_max_turns.join(', ')} steps`);
+  if(j.second_pass_max_turns.length)parts.push(`review limit ${j.second_pass_max_turns.join(', ')}`);
   if(j.timeouts_seconds.length)parts.push(`${seconds(j.timeouts_seconds)} timeout`);
   return parts.map(value=>`<span class="config-setting">${esc(value)}</span>`).join(' · ')||'Endpoint defaults';
 }

@@ -924,9 +924,19 @@ def test_agentic_pass_uses_judge_endpoint_and_turn_precedence(monkeypatch) -> No
 
     _real_classifier(_judge_args())
     _real_classifier(_judge_args("--agentic-max-turns", "7"))
+    _real_classifier(_judge_args("--agentic-max-turns", "2048"))
+    _real_classifier(_judge_args("--agentic-max-turns", "none"))
 
     agentic_builds = [entry for entry in built if entry[0] == "agentic"]
-    assert agentic_builds == [("agentic", 19), ("agentic", 7)]
+    assert agentic_builds == [
+        ("agentic", 19),
+        ("agentic", 7),
+        ("agentic", 2048),
+        ("agentic", None),
+    ]
+
+    with pytest.raises(SystemExit):
+        _judge_args("--agentic-max-turns", "0")
 
 
 @pytest.mark.parametrize("second_pass", ["off", "llm"])
@@ -1175,6 +1185,66 @@ def test_agentic_first_pass_profile_tracks_llm_reviewer_configuration() -> None:
     first, second = profile("reviewer-a"), profile("reviewer-b")
     assert first["configuration_sha256"] == second["configuration_sha256"] == "a" * 64
     assert first["second_pass_configuration_sha256"] != second["second_pass_configuration_sha256"]
+
+
+@pytest.mark.parametrize(
+    ("harness", "prior_tool_limit"),
+    [("codex", 128), ("claude", None), ("claude", 128)],
+)
+def test_resume_accepts_legacy_completed_results_from_a_different_tool_limit(
+    harness, prior_tool_limit
+) -> None:
+    agentic = agentic_review.AgenticClassificationProvider(
+        harness=harness,
+        model="agentic-first",
+        cli_path=None,
+        effort="high",
+        thinking=None,
+        thinking_budget_tokens=None,
+        max_turns=None,
+    )
+    classifier = TaxonomyClassifier(
+        load_taxonomy(None),
+        None,
+        first_pass="agentic",
+        second_pass="off",
+        agentic_provider=agentic,
+    )
+    profile = cli._classification_profile(classifier)
+    prior = {
+        **agentic.configuration(),
+        "configured_max_turns": 128,
+        "tool_call_limit": prior_tool_limit,
+    }
+    prior.pop("tool_budget_semantics")
+    prior_sha256 = hashlib.sha256(
+        json.dumps(prior, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    record = {
+        "taxonomy_sha256": profile["taxonomy_sha256"],
+        "protocol_version": profile["protocol_version"],
+        "classification_method": "agentic_taxonomy_classification",
+        "first_pass": {"method": "agentic"},
+        "second_pass": {"method": "off", "status": "skipped"},
+        "judge": {
+            "requested_model": agentic.model,
+            "configuration_sha256": prior_sha256,
+            "configured_max_turns": 128,
+        },
+    }
+
+    assert cli._matches_classification_profile(record, profile)
+    current_semantics = {
+        **prior,
+        "tool_budget_semantics": agentic_review.AGENTIC_TOOL_BUDGET_SEMANTICS,
+    }
+    record["judge"]["configuration_sha256"] = hashlib.sha256(
+        json.dumps(current_semantics, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    assert not cli._matches_classification_profile(record, profile)
+    record["judge"]["configuration_sha256"] = prior_sha256
+    record["judge"]["configured_max_turns"] = 64
+    assert not cli._matches_classification_profile(record, profile)
 
 
 def test_taxonomy_resume_rejects_profile_from_before_multimodal_judging(tmp_path, monkeypatch):
