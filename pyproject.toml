@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "autofa"
 version = "0.1.0"
-description = "AutoFA — automated failure discovery from eval parquet logs"
+description = "AutoFA — Automated failure analysis for models and agent harnesses"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "CC-BY-4.0 AND Apache-2.0"
@@ -22,7 +22,20 @@ license-files = [
   "third_party/NATIVE_BINARY_REVIEW.md",
   "third_party/licenses/**/*",
 ]
-authors = [{ name = "AutoFA" }]
+authors = [{ name = "NVIDIA Corporation" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
   "numpy>=1.26",
   "pyarrow>=15",
@@ -59,6 +72,11 @@ dev = [
   # Pinned: new releases change detection plugins and the .secrets.baseline format.
   "detect-secrets==1.5.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/NVIDIA/AutoFA"
+Documentation = "https://github.com/NVIDIA/AutoFA/tree/main/docs"
+Issues = "https://github.com/NVIDIA/AutoFA/issues"
 
 [project.scripts]
 autofa = "autofa.cli:main"

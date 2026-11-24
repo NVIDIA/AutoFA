@@ -2,25 +2,25 @@
 
 <h1>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="img/autofa-logo-dark.svg">
-    <img src="img/autofa-logo.svg" alt="NVIDIA AutoFA" width="420">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NVIDIA/AutoFA/main/img/autofa-logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/NVIDIA/AutoFA/main/img/autofa-logo.svg" alt="NVIDIA AutoFA" width="420">
   </picture>
 </h1>
 
 **Automated failure analysis for models and agent harnesses.**
 
 [![NVIDIA](https://img.shields.io/badge/NVIDIA-76B900?logo=nvidia&logoColor=white)](https://www.nvidia.com/)
-[![License](https://img.shields.io/badge/license-Apache--2.0%20%7C%20CC--BY--4.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0%20%7C%20CC--BY--4.0-blue)](https://github.com/NVIDIA/AutoFA/blob/main/LICENSE)
 [![Agents](https://img.shields.io/badge/runs%20with-Claude%20Code%20%7C%20Codex-76B900)](#quick-start)
 
-[Quick start](#quick-start) · [Workflows](#workflows) · [Documentation](#documentation) · [Tutorial](eval_data/README.md) · [Contributing](CONTRIBUTING.md)
+[Quick start](#quick-start) · [Workflows](#workflows) · [Documentation](#documentation) · [Tutorial](https://github.com/NVIDIA/AutoFA/blob/main/eval_data/README.md) · [Contributing](https://github.com/NVIDIA/AutoFA/blob/main/CONTRIBUTING.md)
 
 </div>
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="img/welcome_screen-dark.png">
-    <img src="img/welcome_screen.png" alt="AutoFA home menu in the terminal" width="900">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NVIDIA/AutoFA/main/img/welcome_screen-dark.png">
+    <img src="https://raw.githubusercontent.com/NVIDIA/AutoFA/main/img/welcome_screen.png" alt="AutoFA home menu in the terminal" width="900">
   </picture>
 </p>
 
@@ -40,7 +40,7 @@ It lets you:
 - **Explore and share:** browse failure cards, source traces and highlighted evidence in a local
   library, then publish detectors and reuse them on new runs.
 - **Delegate:** describe the goal to your coding agent and let the bundled
-  [driver skill](agent-skills/autofa-driver/SKILL.md) set up, launch, monitor and explain the work.
+  [driver skill](https://github.com/NVIDIA/AutoFA/blob/main/agent-skills/autofa-driver/SKILL.md) set up, launch, monitor and explain the work.
 
 ### Two lenses, one picture
 
@@ -54,7 +54,7 @@ Discovery and taxonomy classification answer different questions and work best t
 | **Best for** | New benchmarks, unknown mechanisms, regression detectors | Comparable breakdowns across models, harnesses and runs |
 
 Use a taxonomy bucket as the starting cohort for
-[discovery](docs/taxonomy-classification.md#continue-with-failure-discovery) to dig into one
+[discovery](https://github.com/NVIDIA/AutoFA/blob/main/docs/taxonomy-classification.md#continue-with-failure-discovery) to dig into one
 category, and let discovery surface mechanisms that no taxonomy anticipated.
 
 ## Quick start
@@ -62,7 +62,7 @@ category, and let discovery surface mechanisms that no taxonomy anticipated.
 Want to try AutoFA but do not have evaluation logs? The repository includes three example
 LiveCodeBench runs for `thinkingmachines/Inkling-Small`, `zai-org/GLM-5.3-Flash` and
 `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16`. Follow the
-[example reports and bundled-data tutorial](eval_data/README.md) to browse their
+[example reports and bundled-data tutorial](https://github.com/NVIDIA/AutoFA/blob/main/eval_data/README.md) to browse their
 ready-made analyses without running AutoFA, or run AutoFA yourself on the included
 rollout archives.
 
@@ -91,8 +91,8 @@ audio and video support, registers the `autofa-driver` skill and continues as yo
 analysis driver: it helps choose models and effort, picks the right workflow, monitors
 progress, and summarizes findings with suggested next steps. Leave out the analysis goal
 to set up only. Later, invoke the skill directly with `/autofa-driver` in Claude Code or
-`$autofa-driver` in Codex. See [agent setup](docs/agent-setup.md) and
-[operating AutoFA through the driver](docs/driver-supervision.md) for monitoring, stopping
+`$autofa-driver` in Codex. See [agent setup](https://github.com/NVIDIA/AutoFA/blob/main/docs/agent-setup.md) and
+[operating AutoFA through the driver](https://github.com/NVIDIA/AutoFA/blob/main/docs/driver-supervision.md) for monitoring, stopping
 and cost reporting.
 
 ### Option B: run it yourself
@@ -108,7 +108,7 @@ Choose **New analysis** for discovery (with optional efficiency metrics and pref
 checks), **Classify failures by taxonomy** for top-down labelling, or
 **Explore failure library** to browse saved results. For unattended or reproducible runs,
 describe the whole job in a YAML file and use
-[batch mode](docs/workflows.md#batch-runs):
+[batch mode](https://github.com/NVIDIA/AutoFA/blob/main/docs/workflows.md#batch-runs):
 
 ```bash
 uv run --no-sync autofa run --config examples/run-configs/frontier-23859c40d27a4c84.yaml
@@ -116,44 +116,44 @@ uv run --no-sync autofa run --config examples/run-configs/frontier-23859c40d27a4
 
 LLM judges and LLM detectors use an OpenAI-compatible endpoint that you configure
 under **Settings > LLM endpoints**; if it needs a key, store it as `LLM_API_KEY` in the project `.env`.
-See [LLM endpoints](docs/llm-endpoints.md) and [configuration](docs/configuration.md).
+See [LLM endpoints](https://github.com/NVIDIA/AutoFA/blob/main/docs/llm-endpoints.md) and [configuration](https://github.com/NVIDIA/AutoFA/blob/main/docs/configuration.md).
 
 ### See the results
 
 AutoFA starts a local dashboard automatically. Open the **Library** link it prints
 (default <http://127.0.0.1:8765>) to browse failure cards, source traces and reports.
-See the [failure library guide](docs/library.md) for saving, publishing and reusing results.
+See the [failure library guide](https://github.com/NVIDIA/AutoFA/blob/main/docs/library.md) for saving, publishing and reusing results.
 Results persist under `~/.autofa/`.
 
 ## Workflows
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="img/autofa-overview-dark.svg">
-    <img src="img/autofa-overview.svg" alt="AutoFA overview: NeMo Gym, Harbor and EvalRDL runs pass optional preflight cheating checks, then two complementary workflows run in parallel: top-down taxonomy classification and bottom-up failure discovery (with optional efficiency metrics); optionally, one taxonomy category can be explored further with failure discovery. Results land in a browsable failure library, and a coding agent can drive every workflow." width="900">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/NVIDIA/AutoFA/main/img/autofa-overview-dark.svg">
+    <img src="https://raw.githubusercontent.com/NVIDIA/AutoFA/main/img/autofa-overview.svg" alt="AutoFA overview: NeMo Gym, Harbor and EvalRDL runs pass optional preflight cheating checks, then two complementary workflows run in parallel: top-down taxonomy classification and bottom-up failure discovery (with optional efficiency metrics); optionally, one taxonomy category can be explored further with failure discovery. Results land in a browsable failure library, and a coding agent can drive every workflow." width="900">
   </picture>
 </p>
 
 | Workflow | What it answers | Start it with | Guide |
 |---|---|---|---|
-| **Preflight check: cheating** (runs first) | Did the agent look up the answer or tamper with the grader? | `autofa preflight cheating` | [Preflight cheating checks](docs/cheating-check.md) |
-| **Failure discovery** | Which recurring mechanisms cause failures, and how many rollouts does each explain? | **New analysis**, `autofa run` | [Running an analysis](docs/workflows.md) · [Detectors](docs/detectors.md) |
-| **Efficiency metrics** (alongside or after discovery) | How do correct and incorrect rollouts differ in tokens, context, turns, tools and cost? | **Analysis settings > Analyses to run** | [Efficiency metrics](docs/efficiency.md) |
-| **Taxonomy classification** | Which known failure mode does each failed rollout belong to? | **Classify failures by taxonomy**, `autofa classify` | [Taxonomy classification](docs/taxonomy-classification.md) |
+| **Preflight check: cheating** (runs first) | Did the agent look up the answer or tamper with the grader? | `autofa preflight cheating` | [Preflight cheating checks](https://github.com/NVIDIA/AutoFA/blob/main/docs/cheating-check.md) |
+| **Failure discovery** | Which recurring mechanisms cause failures, and how many rollouts does each explain? | **New analysis**, `autofa run` | [Running an analysis](https://github.com/NVIDIA/AutoFA/blob/main/docs/workflows.md) · [Detectors](https://github.com/NVIDIA/AutoFA/blob/main/docs/detectors.md) |
+| **Efficiency metrics** (alongside or after discovery) | How do correct and incorrect rollouts differ in tokens, context, turns, tools and cost? | **Analysis settings > Analyses to run** | [Efficiency metrics](https://github.com/NVIDIA/AutoFA/blob/main/docs/efficiency.md) |
+| **Taxonomy classification** | Which known failure mode does each failed rollout belong to? | **Classify failures by taxonomy**, `autofa classify` | [Taxonomy classification](https://github.com/NVIDIA/AutoFA/blob/main/docs/taxonomy-classification.md) |
 
 ## Documentation
 
 | Topic | Guide |
 |---|---|
-| Terms used throughout AutoFA | [Glossary](docs/glossary.md) |
-| Agent-driven setup and operation | [Agent setup](docs/agent-setup.md) · [Driver supervision](docs/driver-supervision.md) · [Driver skill](agent-skills/autofa-driver/SKILL.md) |
-| Sessions, resume, batch runs and unattended discovery | [Running an analysis](docs/workflows.md) |
-| Inputs: local NeMo Gym / Harbor and remote EvalRDL | [Datasets and rollout selection](docs/datasets.md) · [Local imports and traces](docs/local-traces.md) |
-| Models, endpoints, analysis settings and skills | [Configuration](docs/configuration.md) · [LLM endpoints](docs/llm-endpoints.md) |
-| Writing, validating and scoring detectors | [Detectors](docs/detectors.md) · [Metrics and feedback](docs/metrics.md) |
-| Office rendering, audio, video and speech readers | [Artifact inspection dependencies](docs/artifact-dependencies.md) |
-| Reports, saved libraries, publishing and storage | [Failure library and saved results](docs/library.md) |
-| Token usage, spend and projections | [Usage and cost accounting](docs/usage-accounting.md) |
+| Terms used throughout AutoFA | [Glossary](https://github.com/NVIDIA/AutoFA/blob/main/docs/glossary.md) |
+| Agent-driven setup and operation | [Agent setup](https://github.com/NVIDIA/AutoFA/blob/main/docs/agent-setup.md) · [Driver supervision](https://github.com/NVIDIA/AutoFA/blob/main/docs/driver-supervision.md) · [Driver skill](https://github.com/NVIDIA/AutoFA/blob/main/agent-skills/autofa-driver/SKILL.md) |
+| Sessions, resume, batch runs and unattended discovery | [Running an analysis](https://github.com/NVIDIA/AutoFA/blob/main/docs/workflows.md) |
+| Inputs: local NeMo Gym / Harbor and remote EvalRDL | [Datasets and rollout selection](https://github.com/NVIDIA/AutoFA/blob/main/docs/datasets.md) · [Local imports and traces](https://github.com/NVIDIA/AutoFA/blob/main/docs/local-traces.md) |
+| Models, endpoints, analysis settings and skills | [Configuration](https://github.com/NVIDIA/AutoFA/blob/main/docs/configuration.md) · [LLM endpoints](https://github.com/NVIDIA/AutoFA/blob/main/docs/llm-endpoints.md) |
+| Writing, validating and scoring detectors | [Detectors](https://github.com/NVIDIA/AutoFA/blob/main/docs/detectors.md) · [Metrics and feedback](https://github.com/NVIDIA/AutoFA/blob/main/docs/metrics.md) |
+| Office rendering, audio, video and speech readers | [Artifact inspection dependencies](https://github.com/NVIDIA/AutoFA/blob/main/docs/artifact-dependencies.md) |
+| Reports, saved libraries, publishing and storage | [Failure library and saved results](https://github.com/NVIDIA/AutoFA/blob/main/docs/library.md) |
+| Token usage, spend and projections | [Usage and cost accounting](https://github.com/NVIDIA/AutoFA/blob/main/docs/usage-accounting.md) |
 
 ## Known limitations
 
@@ -169,7 +169,7 @@ Results persist under `~/.autofa/`.
   content is sent to the providers you configure.
 - The Library server uses a shared profile: anyone holding its token can read and modify
   that profile's libraries. Detector execution is not an operating-system sandbox.
-  See [SECURITY.md](SECURITY.md).
+  See [SECURITY.md](https://github.com/NVIDIA/AutoFA/blob/main/SECURITY.md).
 - Initial reading of local runs holds the run in memory, so very large rollouts or expanded
   request histories can exceed the hydration batch budget. Supplying missing metadata
   labels currently rereads the original logs.
@@ -177,7 +177,7 @@ Results persist under `~/.autofa/`.
   do include image codecs: Pillow and pypdfium2 read formats such as JPEG, PNG, GIF, TIFF,
   WebP, AVIF and JPEG 2000. Office rendering and audio and video inspection need readers
   that you install as described in
-  [artifact inspection dependencies](docs/artifact-dependencies.md); a setup agent asks
+  [artifact inspection dependencies](https://github.com/NVIDIA/AutoFA/blob/main/docs/artifact-dependencies.md); a setup agent asks
   before installing them. Without them, Office page images and audio and video content are
   reported unavailable.
 
@@ -189,20 +189,20 @@ synthetic or otherwise authorized data. Release notes are published on
 [GitHub Releases](https://github.com/NVIDIA/AutoFA/releases).
 
 Bug fixes, documentation corrections and tests are welcome; for anything else, open an issue
-and agree the approach with a maintainer first. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the
-[contribution scope](CONTRIBUTING.md#contribution-scope),
-[DCO sign-off](CONTRIBUTING.md#developer-certificate-of-origin) and
-[maintainers](CONTRIBUTING.md#maintainers-and-code-ownership). Participation follows the
-[Code of Conduct](CODE_OF_CONDUCT.md).
+and agree the approach with a maintainer first. Read [CONTRIBUTING.md](https://github.com/NVIDIA/AutoFA/blob/main/CONTRIBUTING.md) for the
+[contribution scope](https://github.com/NVIDIA/AutoFA/blob/main/CONTRIBUTING.md#contribution-scope),
+[DCO sign-off](https://github.com/NVIDIA/AutoFA/blob/main/CONTRIBUTING.md#developer-certificate-of-origin) and
+[maintainers](https://github.com/NVIDIA/AutoFA/blob/main/CONTRIBUTING.md#maintainers-and-code-ownership). Participation follows the
+[Code of Conduct](https://github.com/NVIDIA/AutoFA/blob/main/CODE_OF_CONDUCT.md).
 
 ## Security
 
-Report vulnerabilities privately through the channels in [SECURITY.md](SECURITY.md). Keep
+Report vulnerabilities privately through the channels in [SECURITY.md](https://github.com/NVIDIA/AutoFA/blob/main/SECURITY.md). Keep
 credentials, private traces and personal information out of public issues and pull requests.
 
 ## License
 
 AutoFA is released under **CC-BY-4.0 AND Apache-2.0**: code-only files are Apache-2.0, while
-documentation, prompts, skills and assets follow the dual-license terms in [LICENSE](LICENSE).
+documentation, prompts, skills and assets follow the dual-license terms in [LICENSE](https://github.com/NVIDIA/AutoFA/blob/main/LICENSE).
 Third-party material keeps its own terms, recorded in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[THIRD_PARTY_NOTICES.md](https://github.com/NVIDIA/AutoFA/blob/main/THIRD_PARTY_NOTICES.md).
