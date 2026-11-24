@@ -13,7 +13,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0%20%7C%20CC--BY--4.0-blue)](LICENSE)
 [![Agents](https://img.shields.io/badge/runs%20with-Claude%20Code%20%7C%20Codex-76B900)](#quick-start)
 
-[Quick start](#quick-start) · [Example AutoFA reports](eval_data/README.md) · [Workflows](#workflows) · [Documentation](#documentation) · [Contributing](CONTRIBUTING.md)
+[Quick start](#quick-start) · [Workflows](#workflows) · [Documentation](#documentation) · [Tutorial](eval_data/README.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -59,8 +59,9 @@ category, and let discovery surface mechanisms that no taxonomy anticipated.
 
 ## Quick start
 
-Want to try AutoFA but do not have evaluation logs? The repository includes two
-example LiveCodeBench runs for Inkling and GLM. Follow the
+Want to try AutoFA but do not have evaluation logs? The repository includes three example
+LiveCodeBench runs for `thinkingmachines/Inkling-Small`, `zai-org/GLM-5.3-Flash` and
+`nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16`. Follow the
 [example reports and bundled-data tutorial](eval_data/README.md) to browse their
 ready-made analyses without running AutoFA, or run AutoFA yourself on the included
 rollout archives.
