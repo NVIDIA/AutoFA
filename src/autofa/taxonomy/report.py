@@ -226,6 +226,7 @@ def _manifest_references(document: dict[str, Any] | None) -> dict[str, dict[str,
             references[run_id] = make_reference_data(
                 run_id=run_id,
                 export_url=canonical_export_url(base_url, run_id),
+                run_uuid=run.get("run_uuid"),
             )
         except ValueError:
             continue
@@ -237,12 +238,14 @@ def _viewer_reference(
     document: dict[str, Any] | None,
     override: str,
 ) -> dict[str, str] | None:
+    reference = _manifest_references(document).get(run_id)
     if override:
         return make_reference_data(
             run_id=run_id,
             export_url=canonical_export_url(override, run_id),
+            run_uuid=(reference or {}).get("run_uuid"),
         )
-    return _manifest_references(document).get(run_id)
+    return reference
 
 
 def _group_by_compatibility(

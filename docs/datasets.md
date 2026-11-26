@@ -50,14 +50,19 @@ single-model runs retain their model name.
 
 ```bash
 # Download your run without immediately starting discovery
-autofa new --api-run RUN_ID --no-auto --eval-limit 200
+autofa new --api-run RUN_UUID --no-auto --eval-limit 200
 
 # Optional API base override
-autofa new --api-run <run_id> --api-base https://eval.example.org
+autofa new --api-run <run_uuid> --api-base https://eval.example.org
 
 # Fetch updated exports and rebuild the trace cache, even for a previously downloaded run
-autofa new --api-run <run_id> --refresh-api
+autofa new --api-run <run_uuid> --refresh-api
 ```
+
+`--api-run` takes the EvalRDL run uuid, the 32-hex address in the run's
+`#/run/<run_uuid>` link; the run's 16-hex `run_id` also works. AutoFA filters the
+trace tables by `run_uuid` (by `run_id` on a server whose trace tables have no
+`run_uuid` column) and links reports to `#/run/<run_uuid>`.
 
 API docs: [EvalRDL remote server OpenAPI](https://eval.example.org/api/docs). Catalog filters: `GET /v1/runs?benchmark=swebench-verified`.
 
@@ -75,7 +80,7 @@ runs, AutoFA discovers them recursively and imports each run separately.
 autofa prepare
 
 # One or more known runs
-autofa prepare --api-run <run_id>
+autofa prepare --api-run <run_uuid>
 
 # The five newest matching catalog runs
 autofa prepare --model <model> --benchmark <benchmark> --latest 5
@@ -151,8 +156,8 @@ not replace the full trace export. `--refresh-api` forces a new download and tra
 for New/Continue when an upstream run changes.
 Each refresh writes a new export generation and publishes it only after its dataset
 and provenance are complete. Saved runs keep their original paths and bytes; failed
-refreshes leave the previous export usable. Aliases resolved by the catalog share
-the canonical run ID's cache.
+refreshes leave the previous export usable. A run uuid, its `run_id` and other
+aliases resolved by the catalog share the canonical `run_id`'s cache.
 For Responses-API/NeMo Gym sources, original JSONL records supply recorded model
 requests and responses omitted by the normalized event API. Empty event traces
 are reconstructed from these model calls, including reasoning and tool calls.

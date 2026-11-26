@@ -538,7 +538,7 @@ fields take the current defaults. Resuming an existing run retains its saved sco
 a new Continue run uses the current objective behavior described above.
 
 For a bounded unattended pilot, use
-`autofa new --api-run RUN_ID --optimization balanced --rounds 2 --min-failure-modes 0 --once`.
+`autofa new --api-run RUN_UUID --optimization balanced --rounds 2 --min-failure-modes 0 --once`.
 `--rounds` bypasses the depth picker for New/Continue; disabling the minimum prevents
 automatic extra rounds. Resume keeps the original run's objective and discovery state.
 

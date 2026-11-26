@@ -576,14 +576,16 @@ def test_download_uses_canonical_run_for_provenance_and_passes_explicit_refresh(
     tmp_path, monkeypatch,
 ):
     calls = []
+    run_uuid = "0123456789abcdef" * 2
     _stub_download(monkeypatch, tmp_path, calls=calls, remote_full_traces=False)
     result = remote_runs._download_one(
-        _FakeApi(), "uuid", {"run_id": "canonical", "run_uuid": "uuid"}, force=True,
+        _FakeApi(), run_uuid, {"run_id": "canonical", "run_uuid": run_uuid}, force=True,
     )
     (run_id, options), = calls
     assert run_id == "canonical" and options["force"] is True
     assert result.run_id == "canonical"
     assert result.export_url == f"{API}/v1/runs/canonical/export/autofa"
+    assert result.reference_data()["run_uuid"] == run_uuid
 
 
 # Local rollout exports enter Data API source recovery only with a known identity.

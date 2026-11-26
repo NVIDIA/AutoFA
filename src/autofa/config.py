@@ -1135,6 +1135,7 @@ def _backfill_reference_data(data: dict[str, Any]) -> list[dict[str, str]]:
                 export_url=f"{base_url}{export_path}",
                 source_harness=str(catalog.get("harness") or "unknown"),
                 parquet_path=parquet,
+                run_uuid=catalog.get("run_uuid"),
             )
         )
     return normalize_reference_data(recovered)

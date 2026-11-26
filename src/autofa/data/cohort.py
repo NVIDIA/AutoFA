@@ -50,6 +50,9 @@ _HEALTHY_SCORED = (
 _FAILURES = (
     f"{_HEALTHY_SCORED} AND reward <= 0"
 )
+# ClickHouse rejecting the column itself: "Unknown expression identifier `run_uuid`",
+# "Missing columns: 'run_uuid'". Other errors may quote the SQL, which names run_uuid too.
+_NO_RUN_UUID_COLUMN = re.compile(r"(?:identifier|columns?)\W{1,4}run_uuid\b", re.IGNORECASE)
 _REWARD = re.compile(
     r"^\s*(<=|>=|==|=|<|>)\s*"
     r"(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*$"
@@ -199,11 +202,11 @@ def select_cohort(
     if api_runs or not folders:
         whole_runs = not rollout_filter and not per_run and not limit
         api = api or DataApiClient()
-        for run_id in _remote_runs(api, run_filter, api_runs, latest):
+        for run_id, run_uuid in _remote_runs(api, run_filter, api_runs, latest):
             source, selected = (
                 (_select_whole_remote(api, run_id), [])
                 if whole_runs
-                else _select_remote(api, run_id, rollout_filter, per_run, order)
+                else _select_remote(api, run_id, run_uuid, rollout_filter, per_run, order)
             )
             sources.append(source)
             rows.extend(selected)
@@ -327,35 +330,82 @@ class _Order:
         return row["task_id"], row["repeat"]
 
 
+def query_remote_run(
+    api: DataApiClient, run_id: str, run_uuid: str,
+    select: str, conditions: Iterable[str] = (), tail: str = "",
+) -> tuple[dict[str, Any], str]:
+    """Run ``select WHERE <this run> AND conditions tail`` on EvalRDL's trace tables.
+
+    The trace tables (``di.rollouts``, ``di.events``, ...) are partitioned and sorted by
+    ``run_uuid``, where a ``run_id`` filter reads every partition. A server whose trace tables
+    predate that layout rejects the unknown column with a 400, and the query runs again on
+    ``run_id``. Returns the result and the ``run_uuid`` to keep using: empty after a fallback.
+    """
+    conditions = list(conditions)
+
+    def sql(run: str) -> str:
+        return f"{select} WHERE {' AND '.join([run, *conditions])} {tail}".rstrip()
+
+    if run_uuid:
+        try:
+            return api.query_analytics(sql(f"run_uuid = {_sql_literal(run_uuid)}")), run_uuid
+        except DataApiError as exc:
+            if exc.status != 400 or not _NO_RUN_UUID_COLUMN.search(str(exc)):
+                raise
+    return api.query_analytics(sql(f"run_id = {_sql_literal(run_id)}")), ""
+
+
+def remote_run_uuid(api: DataApiClient, source: Mapping[str, Any]) -> str:
+    """The ``run_uuid`` of a remote cohort source; a source saved without one asks the catalog."""
+    recorded = str(source.get("run_uuid") or "").strip()
+    if recorded:
+        return recorded
+    return str(api.get_run(str(source["run_id"])).get("run_uuid") or "").strip()
+
+
+def _catalog_identity(catalog: Mapping[str, Any], requested: str) -> tuple[str, str]:
+    return (
+        str(catalog.get("run_id") or requested).strip(),
+        str(catalog.get("run_uuid") or "").strip(),
+    )
+
+
 def _remote_runs(
     api: DataApiClient, run_filter: str, runs: list[str], latest: int,
-) -> list[str]:
-    # The analytics tables use canonical run ids; the catalog also accepts aliases.
-    canonical = [str(api.get_run(run_id).get("run_id") or run_id).strip() for run_id in runs]
-    if canonical and not run_filter:
-        return canonical
+) -> list[tuple[str, str]]:
+    """``(run_id, run_uuid)`` of each selected run; ``run_uuid`` is empty if the server has none.
+
+    The catalog accepts a run uuid or run_id; the rows keep the canonical run_id.
+    """
+    explicit = [_catalog_identity(api.get_run(run), run) for run in runs]
+    if explicit and not run_filter:
+        return explicit
     clauses = ["run_id IS NOT NULL"]
     if run_filter:
         clauses.append(f"({run_filter})")
-    if canonical:
-        clauses.append(f"run_id IN ({', '.join(_sql_literal(run) for run in canonical)})")
+    if explicit:
+        clauses.append(f"run_id IN ({', '.join(_sql_literal(run) for run, _ in explicit)})")
     result = api.query_analytics(
-        f"SELECT run_id, max(run_ts) AS selected_run_ts FROM di.runs "
+        f"SELECT run_id, any(run_uuid) AS run_uuid, max(run_ts) AS selected_run_ts FROM di.runs "
         f"WHERE {' AND '.join(clauses)} GROUP BY run_id "
         f"ORDER BY selected_run_ts DESC NULLS LAST, run_id LIMIT {latest or MAX_RUNS + 1}"
     )
-    matched = [row["run_id"] for row in result["rows"]]
+    matched = {row["run_id"]: str(row.get("run_uuid") or "") for row in result["rows"]}
     if not latest and len(matched) > MAX_RUNS:
         raise ValueError(f"More than {MAX_RUNS} runs match; narrow the run filter")
-    return [run for run in canonical if run in set(matched)] if canonical else matched
+    if explicit:
+        return [identity for identity in explicit if identity[0] in matched]
+    return list(matched.items())
 
 
 def _select_whole_remote(api: DataApiClient, run_id: str) -> dict[str, Any]:
     catalog = api.get_run(run_id)
+    canonical, run_uuid = _catalog_identity(catalog, run_id)
     return {
         "kind": "remote",
         "base_url": api.base_url,
-        "run_id": str(catalog.get("run_id") or run_id),
+        "run_id": canonical,
+        **({"run_uuid": run_uuid} if run_uuid else {}),
         "selection": "all",
         "n_rollouts": catalog.get("n_rollouts"),
         "dataset_contract": catalog.get("dataset_contract"),
@@ -364,21 +414,19 @@ def _select_whole_remote(api: DataApiClient, run_id: str) -> dict[str, Any]:
 
 
 def _select_remote(
-    api: DataApiClient, run_id: str, rollout_filter: str, limit: int,
+    api: DataApiClient, run_id: str, run_uuid: str, rollout_filter: str, limit: int,
     order: _Order,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    clauses = [f"run_id = {_sql_literal(run_id)}"]
-    if rollout_filter:
-        clauses.append(f"({rollout_filter})")
+    clauses = [f"({rollout_filter})"] if rollout_filter else []
     rows: list[dict[str, Any]] = []
     result: dict[str, Any] = {}
     after = ""
+    address = run_uuid
     while True:
         size = min(PAGE_SIZE, limit - len(rows)) if limit else PAGE_SIZE
-        result = api.query_analytics(
-            f"SELECT {', '.join(_COLUMNS)} FROM di.rollouts "
-            f"WHERE {' AND '.join(clauses + ([after] if after else []))} "
-            f"ORDER BY {order.sql()} LIMIT {size}"
+        result, address = query_remote_run(
+            api, run_id, address, f"SELECT {', '.join(_COLUMNS)} FROM di.rollouts",
+            clauses + ([after] if after else []), f"ORDER BY {order.sql()} LIMIT {size}",
         )
         page = result["rows"]
         rows.extend(page)
@@ -392,6 +440,7 @@ def _select_remote(
         raise DataApiError(f"Run {run_id} has ambiguous task/repeat identities across agents")
     source = {
         "kind": "remote", "base_url": api.base_url, "run_id": run_id,
+        **({"run_uuid": run_uuid} if run_uuid else {}),
         "dataset_contract": result.get("dataset_contract"),
         "metadata_watermark": result.get("metadata_watermark"),
     }
@@ -644,6 +693,7 @@ def _materialize_whole_run_rows(
         selected_source, selected_rows = _select_remote(
             source_api,
             str(source["run_id"]),
+            remote_run_uuid(source_api, source),
             "",
             0,
             _Order("first", 0),
@@ -845,6 +895,7 @@ def _prepare_remote(
         source_harness=source_harness,
         parquet_path=export,
         evidence_scope=evidence_scope,
+        run_uuid=catalog.get("run_uuid"),
     )
 
 
@@ -881,7 +932,7 @@ def add_cohort_arguments(
     """Add the rollout selection flags shared by commands that build cohorts."""
     runs = parser.add_argument_group("which runs")
     runs.add_argument("--api-run", action="append", default=[], metavar="ID",
-                      help="EvalRDL run ID (repeatable)")
+                      help="EvalRDL run uuid, or its 16-hex run_id (repeatable)")
     runs.add_argument(
         "--input",
         action="append",
@@ -982,7 +1033,7 @@ unchanged to EvalRDL and require remote runs.
 
 examples:
   autofa prepare
-  autofa prepare --api-run RUN_ID
+  autofa prepare --api-run RUN_UUID
   autofa prepare --model MODEL --benchmark BENCH --latest 5
   autofa prepare --input RESULTS_DIR --label OWN-IGM
 

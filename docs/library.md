@@ -91,7 +91,7 @@ service when it conflicts with the run's recorded service.
 ## Data cards and branches
 
 Cloud and local Hub cards are grouped by source data within an owner's namespace.
-An EvalRDL source is identified by its service origin and run ID. Local inputs use
+An EvalRDL source is identified by its service origin and canonical `run_id`. Local inputs use
 stable content hashes, so moving a file does not create a different dataset.
 Analyses using the same set of input datasets share a card, even when their model
 or benchmark labels differ. Each saved version retains its model, benchmarks,

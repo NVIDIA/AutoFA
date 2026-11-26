@@ -90,6 +90,7 @@ class RemoteRunDownload:
     run_id: str
     source_harness: str = "unknown"
     evidence_scope: str = ""
+    run_uuid: str = ""
 
     def reference_data(self) -> dict[str, str]:
         result = {
@@ -100,6 +101,8 @@ class RemoteRunDownload:
         }
         if self.evidence_scope:
             result["evidence_scope"] = self.evidence_scope
+        if self.run_uuid:
+            result["run_uuid"] = self.run_uuid
         return result
 
 
@@ -155,9 +158,12 @@ def _download_one(
     *, force: bool = False,
     efficiency_only: bool = False,
 ) -> RemoteRunDownload:
+    # A run uuid and its run_id both resolve to the catalog's run_id, which keys the export
+    # cache and saved references; the uuid is kept for viewer links.
     canonical_id = (catalog or {}).get("run_id")
     if isinstance(canonical_id, str) and canonical_id.strip():
         rid = canonical_id.strip()
+    run_uuid = str((catalog or {}).get("run_uuid") or "").strip()
     set_action_stage("download AutoFA export", api_url=api.base_url, source_run_id=rid)
     source_url = canonical_export_url(api.base_url, rid)
     already_cached = not force and current_remote_export(rid, base_url=api.base_url) is not None
@@ -294,6 +300,7 @@ def _download_one(
         run_id=rid,
         source_harness=source_harness or "unknown",
         evidence_scope=evidence_scope,
+        run_uuid=run_uuid,
     )
 
 

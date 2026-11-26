@@ -61,7 +61,7 @@ Choose exactly one source:
 
 ```yaml
 source:
-  evalrdl_url: https://eval.example.org/#/run/<run-id>
+  evalrdl_url: https://eval.example.org/#/run/<run-uuid>
 ```
 
 or a local NeMo Gym/Harbor run:
@@ -73,7 +73,7 @@ source:
 
 Relative local paths resolve beside the YAML and must contain exactly one recognized
 run. Classification workflows may instead use `source.api_runs` with one or
-more remote run IDs. Their complete schema is in
+more EvalRDL run uuids (or 16-hex run_ids). Their complete schema is in
 [Taxonomy classification](taxonomy-classification.md#run-the-complete-workflow-from-one-config).
 See [`src/autofa/run_spec.py`](../src/autofa/run_spec.py) for the authoritative
 field validation and source behavior.
@@ -266,11 +266,11 @@ reusable; an interrupted individual download may restart. An interrupted model r
 without a completed checkpoint may also need repeating. Resume reconstructs evaluation
 aggregates from saved successful items rather than publishing a partial evaluation.
 
-To debug a specific EvalRDL run ID without returning to the home menu:
+To debug a specific EvalRDL run without returning to the home menu:
 
 ```bash
 set -o pipefail
-autofa new --api-run <remote-run-id> --analysis-focus both --once \
+autofa new --api-run <run-uuid> --analysis-focus both --once \
   2>&1 | tee /tmp/autofa-debug.log
 ```
 
@@ -432,7 +432,7 @@ taxonomy profiles use separate `--output` files. Sharded runs require a
 shard-specific `--output`.
 
 ```bash
-autofa classify --api-run RUN_ID
+autofa classify --api-run RUN_UUID
 autofa classify report taxonomy_classifications.jsonl
 autofa run --config taxonomy-classification.yaml
 
@@ -461,7 +461,7 @@ the fix, edited the tests, ...). Patterns screen every rollout, an LLM judge
 reviews the flagged ones, and an HTML report lists the cheated rollouts.
 
 ```bash
-autofa preflight cheating --api-run RUN_ID
+autofa preflight cheating --api-run RUN_UUID
 autofa preflight cheating --input ./eval-results --max-reviews 50
 ```
 
@@ -479,7 +479,7 @@ See [docs/cheating-check.md](cheating-check.md).
 ## Tips
 
 - Start with **New analysis** → **Local eval logs (NeMo Gym / Harbor)** or **EvalRDL remote server** → select runs → `/discover`
-- For SWE: type `benchmark:swebench-verified` in the remote picker, or `autofa new --api-run RUN_ID`
+- For SWE: type `benchmark:swebench-verified` in the remote picker, or `autofa new --api-run RUN_UUID`
 - Read submit feedback (`verdict` + metrics + novelty warnings); drop **EMPTY / WEAK** detectors
 - Open `/dashboard` to read **Mechanism**, **How the detector works**, bucket precision, and source
 - Use `/goal` when iterating rounds; stop when the frontier stops improving

@@ -10,7 +10,7 @@ After [setup](../README.md#quick-start), prefix the commands below with
 ```bash
 autofa classify                                  # pick runs and a count interactively
 autofa classify --input ./eval-results           # local NeMo-Gym / Harbor run
-autofa classify --api-run RUN_ID --all           # every failure of a remote run
+autofa classify --api-run RUN_UUID --all         # every failure of a remote run
 autofa classify --input SELECTION_ID             # reuse a saved selection
 autofa classify report results.jsonl more/       # rebuild the report
 ```
