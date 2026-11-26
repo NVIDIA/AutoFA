@@ -26,7 +26,6 @@ from typing import Any
 from autofa.data.cohort import (
     _HEALTHY_SCORED,
     Cohort,
-    _sql_literal,
     add_cohort_arguments,
     add_taxonomy_filter_arguments,
     cohort_options,
@@ -35,7 +34,9 @@ from autofa.data.cohort import (
     matches_reward_filters,
     parse_reward_filters,
     prepare_data,
+    query_remote_run,
     refine_cohort,
+    remote_run_uuid,
     resolve_inputs,
     save_cohort,
     select_cohort,
@@ -805,10 +806,9 @@ def _warn_partial_rewards(cohort: Cohort, api: DataApiClient) -> None:
                 if api.base_url == source["base_url"]
                 else DataApiClient(source["base_url"], timeout=DATA_API_TIMEOUT_SECONDS)
             )
-            result = client.query_analytics(
-                "SELECT task_id FROM di.rollouts "
-                f"WHERE run_id = {_sql_literal(run_id)} AND {_HEALTHY_SCORED} "
-                "AND reward > 0 AND reward < 1 LIMIT 1"
+            result, _ = query_remote_run(
+                client, run_id, remote_run_uuid(client, source), "SELECT task_id FROM di.rollouts",
+                [_HEALTHY_SCORED, "reward > 0 AND reward < 1"], "LIMIT 1",
             )
             if result.get("rows"):
                 partial_runs.append(run_id)
@@ -863,7 +863,7 @@ def build_classify_parser() -> argparse.ArgumentParser:
             "examples:\n"
             "  autofa classify\n"
             "  autofa classify --input ./eval-results\n"
-            "  autofa classify --api-run RUN_ID --all --resume\n"
+            "  autofa classify --api-run RUN_UUID --all --resume\n"
             "  autofa classify --input SELECTION_ID\n"
             "  autofa classify report RESULTS.jsonl [MORE.jsonl | FOLDER ...]"
         ),

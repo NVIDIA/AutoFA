@@ -32,6 +32,7 @@ from autofa.data.reference_data import (
     inspect_url,
     make_local_reference_data,
     make_reference_data,
+    normalize_reference_data,
     require_canonical_reference_data,
     rollout_url,
 )
@@ -430,14 +431,17 @@ def test_legacy_run_config_backfills_remote_cache_sidecar(tmp_path: Path, monkey
     parquet = tmp_path / "remote-cache" / "dataset.parquet"
     parquet.parent.mkdir()
     parquet.write_bytes(b"parquet")
+    run_uuid = "0123456789abcdef" * 2
     (parquet.parent / "source.json").write_text(json.dumps({
         "run_id": "data-run-2", "base_url": DATA_API,
-        "export_path": "/v1/runs/data-run-2/export/autofa", "catalog": {"harness": "nemo-gym"},
+        "export_path": "/v1/runs/data-run-2/export/autofa",
+        "catalog": {"harness": "nemo-gym", "run_uuid": run_uuid},
     }), encoding="utf-8")
     RunConfig(run_id="legacy-run", parquet_paths=[str(parquet)], model_id="model-a").save()
     loaded = RunConfig.load("legacy-run")
     assert loaded.source_harness == "nemo-gym"
     assert loaded.reference_data[0]["run_id"] == "data-run-2"
+    assert loaded.reference_data[0]["run_uuid"] == run_uuid
     assert loaded.reference_data[0]["parquet_path"] == str(parquet.resolve())
 
 
@@ -462,6 +466,26 @@ def test_report_item_links_to_exact_data_api_rollout_and_source_run(tmp_path: Pa
     assert "parquet_path" not in report["meta"]["reference_data"][1]
     # The sandboxed report opens source links through its parent frame's bridge.
     assert "namespace: 'autofa.source-data'" in render_html(report)
+
+
+def test_viewer_links_use_the_run_uuid_and_identity_keeps_run_id(tmp_path: Path):
+    run_uuid = "0123456789abcdef" * 2
+    legacy = reference(tmp_path / "dataset.parquet", "run-a")
+    current = {**legacy, "run_uuid": run_uuid}
+    assert inspect_url(current) == f"{DATA_API}/#/run/{run_uuid}"
+    assert rollout_url(current, problem_id="suite/task", run_idx=3) == (
+        f"{DATA_API}/#/rollout/{run_uuid}/suite%252Ftask/3"
+    )
+    # A reference saved without a uuid keeps its run_id links.
+    assert inspect_url(legacy) == f"{DATA_API}/#/run/run-a"
+    # The export, its cache and the data identity stay keyed by run_id.
+    assert data_api_location(current) == (DATA_API, "run-a")
+    assert (publication_data_identity([], reference_data=[current])
+            == publication_data_identity([], reference_data=[legacy]))
+    assert normalize_reference_data([current])[0]["run_uuid"] == run_uuid
+    for invalid in ("RUN-A", run_uuid.upper(), run_uuid[:16]):
+        assert "run_uuid" not in normalize_reference_data([{**legacy, "run_uuid": invalid}])[0]
+        assert inspect_url({**legacy, "run_uuid": invalid}) == f"{DATA_API}/#/run/run-a"
 
 
 @pytest.mark.parametrize("case", ["outside", "wrong-cohort", "unlisted"])

@@ -28,7 +28,7 @@ from autofa.data.cohort import (
 )
 from autofa.data.evalrdl_efficiency import collect_evalrdl_efficiency
 from autofa.data.local_import import import_local_run, reference_for_import
-from autofa.data.remote_api import DataApiClient, stage_export_subset
+from autofa.data.remote_api import DataApiClient, DataApiError, stage_export_subset
 from autofa.taxonomy import groups
 from autofa.ui import menus
 from autofa.wizard import dataset, remote_runs
@@ -37,6 +37,8 @@ from autofa.wizard.dataset import run_dataset_wizard
 from support.traces import UrlResponse
 
 pytestmark = pytest.mark.filterwarnings("ignore:Local import retained:UserWarning")
+
+CANON_UUID = "0123456789abcdef" * 2
 
 
 def _row(task: str, repeat: int, run_id: str = "canon") -> dict:
@@ -56,16 +58,25 @@ def _write_parquet(path: Path, rows: list[dict]) -> Path:
 
 
 class FakeApi:
+    """A catalog in which ``alias`` and ``CANON_UUID`` both name the run ``canon``."""
+
     base_url = "https://api.test"
 
-    def __init__(self, pages: list[list[dict]], *, n_rollouts: int = 3):
+    def __init__(self, pages: list[list[dict]], *, n_rollouts: int = 3,
+                 run_uuids: dict[str, str] | None = None):
         self.pages = pages
         self.n_rollouts = n_rollouts
+        self.run_uuids = {"canon": CANON_UUID} if run_uuids is None else run_uuids
         self.sql: list[str] = []
+        self.lookups: list[str] = []
 
     def get_run(self, run_id: str) -> dict:
-        return {"run_id": "canon" if run_id == "alias" else run_id,
-                "n_rollouts": self.n_rollouts}
+        self.lookups.append(run_id)
+        canonical = "canon" if run_id in {"alias", CANON_UUID} else run_id
+        run = {"run_id": canonical, "n_rollouts": self.n_rollouts}
+        if canonical in self.run_uuids:
+            run["run_uuid"] = self.run_uuids[canonical]
+        return run
 
     def query_analytics(self, sql: str) -> dict:
         self.sql.append(sql)
@@ -99,18 +110,118 @@ def test_remote_rollouts_are_run_scoped_and_paged(monkeypatch) -> None:
     api = FakeApi([[_row("t1", 0), _row("t1", 1)], [_row("t2", 0)]])
     cohort = select_cohort(where="reward <= 0", api_runs=["alias"], api=api)
     assert cohort.identities() == [("t1", 0), ("t1", 1), ("t2", 0)]
+    assert f"WHERE run_uuid = '{CANON_UUID}' AND (reward <= 0)" in api.sql[0]
+    assert (f"WHERE run_uuid = '{CANON_UUID}' AND (reward <= 0) "
+            "AND (task_id, repeat, agent_ref) > ('t1', 1, 'agent')") in api.sql[1]
+    assert cohort.sources[0]["run_id"] == "canon"
+    assert cohort.sources[0]["run_uuid"] == CANON_UUID
+
+
+@pytest.mark.parametrize("where", ["", "reward <= 0"], ids=["whole_run", "filtered"])
+def test_a_run_uuid_and_its_run_id_select_the_same_cohort(where) -> None:
+    def select(run: str) -> Cohort:
+        return select_cohort(where=where, api_runs=[run], api=FakeApi([[_row("t1", 0)]]))
+
+    by_uuid, by_run_id = select(CANON_UUID), select("canon")
+    assert by_uuid.id == by_run_id.id
+    assert by_uuid.sources == by_run_id.sources
+    assert by_uuid.sources[0]["run_id"] == "canon"
+    assert by_uuid.sources[0]["run_uuid"] == CANON_UUID
+    # A selection saved before sources recorded run_uuid keeps its id.
+    saved = by_uuid.to_json()
+    saved["sources"] = [{k: v for k, v in source.items() if k != "run_uuid"}
+                        for source in saved["sources"]]
+    assert Cohort.from_json(saved).id == by_uuid.id
+
+
+def test_run_without_a_catalog_uuid_falls_back_to_run_id() -> None:
+    api = FakeApi([[_row("t1", 0)]], run_uuids={})
+    cohort = select_cohort(where="reward <= 0", api_runs=["alias"], api=api)
     assert "WHERE run_id = 'canon' AND (reward <= 0)" in api.sql[0]
-    assert "(task_id, repeat, agent_ref) > ('t1', 1, 'agent')" in api.sql[1]
+    assert "run_uuid" not in cohort.sources[0]
+
+
+class RunIdLayoutApi(FakeApi):
+    """A server whose trace tables have no run_uuid column yet."""
+
+    def __init__(self, pages: list[list[dict]], error: DataApiError | None = None):
+        super().__init__(pages)
+        self.error = error or DataApiError(
+            "API 400 querying analytics: {\"error\": \"Code: 47. DB::Exception: Unknown "
+            "expression identifier `run_uuid` in scope SELECT\"}", status=400,
+        )
+
+    def query_analytics(self, sql: str) -> dict:
+        if "run_uuid =" in sql:
+            self.sql.append(sql)
+            raise self.error
+        return super().query_analytics(sql)
+
+
+def test_trace_tables_without_run_uuid_fall_back_to_run_id(monkeypatch) -> None:
+    monkeypatch.setattr(cohort_module, "PAGE_SIZE", 1)
+    api = RunIdLayoutApi([[_row("t1", 0)], [_row("t2", 0)], []])
+    cohort = select_cohort(where="reward <= 0", api_runs=[CANON_UUID], api=api)
+    assert cohort.identities() == [("t1", 0), ("t2", 0)]
+    assert f"WHERE run_uuid = '{CANON_UUID}' AND (reward <= 0)" in api.sql[0]
+    # One rejected query, then every page filters by run_id.
+    assert [sql.count("run_uuid =") for sql in api.sql] == [1, 0, 0, 0]
+    assert all("WHERE run_id = 'canon' AND (reward <= 0)" in sql for sql in api.sql[1:])
+    assert cohort.sources[0]["run_uuid"] == CANON_UUID
+
+
+@pytest.mark.parametrize("error", [
+    DataApiError("API 400 querying analytics: syntax error near reward", status=400),
+    DataApiError(
+        "API 400 querying analytics: Unknown expression identifier `rewrd` in scope "
+        "SELECT task_id FROM di.rollouts WHERE run_uuid = 'x'", status=400,
+    ),
+    DataApiError("API 503 querying analytics: Missing columns: 'run_uuid'", status=503),
+], ids=["other_bad_request", "other_unknown_identifier", "server_error"])
+def test_other_query_errors_do_not_fall_back_to_run_id(error) -> None:
+    api = RunIdLayoutApi([[_row("t1", 0)]], error)
+    with pytest.raises(DataApiError) as raised:
+        select_cohort(where="reward <= 0", api_runs=["canon"], api=api)
+    assert raised.value is error
+    assert len(api.sql) == 1
 
 
 def test_run_filter_finds_runs_then_filters_their_rollouts() -> None:
-    api = FakeApi([[{"run_id": "r1"}, {"run_id": "r2"}],
+    r1_uuid = "1" * 32
+    api = FakeApi([[{"run_id": "r1", "run_uuid": r1_uuid}, {"run_id": "r2", "run_uuid": None}],
                    [_row("t1", 0, "r1")], [_row("t1", 0, "r2")]])
     cohort = select_cohort(runs_where="model = 'm'", where="reward <= 0", latest=2, api=api)
     assert [source["run_id"] for source in cohort.sources] == ["r1", "r2"]
+    assert "SELECT run_id, any(run_uuid) AS run_uuid, max(run_ts)" in api.sql[0]
     assert "FROM di.runs WHERE run_id IS NOT NULL AND (model = 'm')" in api.sql[0]
     assert "ORDER BY selected_run_ts DESC NULLS LAST, run_id LIMIT 2" in api.sql[0]
-    assert "run_id = 'r2'" in api.sql[2]
+    assert f"WHERE run_uuid = '{r1_uuid}' AND" in api.sql[1]
+    assert "WHERE run_id = 'r2' AND" in api.sql[2]
+    assert api.lookups == []
+
+
+def test_explicit_runs_and_a_run_filter_keep_their_uuids() -> None:
+    # The explicit run's uuid comes from its catalog lookup, not the filter query.
+    api = FakeApi([[{"run_id": "canon"}], [_row("t1", 0)]])
+    cohort = select_cohort(api_runs=[CANON_UUID], runs_where="model = 'm'", where="true",
+                           api=api)
+    assert "run_id IN ('canon')" in api.sql[0]
+    assert f"WHERE run_uuid = '{CANON_UUID}' AND (true)" in api.sql[1]
+    assert cohort.sources[0]["run_uuid"] == CANON_UUID
+
+
+@pytest.mark.parametrize("saved_uuid", [False, True], ids=["saved_before_uuid", "saved_uuid"])
+def test_whole_run_materialization_filters_by_run_uuid(saved_uuid) -> None:
+    source = {"kind": "remote", "base_url": "https://api.test", "run_id": "canon",
+              "selection": "all", "n_rollouts": 1}
+    if saved_uuid:
+        source["run_uuid"] = CANON_UUID
+    api = FakeApi([[_row("t1", 0)]])
+    cohort = Cohort(runs_where="", where="", sources=[source], rows=[])
+    materialized = cohort_module._materialize_whole_run_rows(cohort, api=api)
+    assert f"WHERE run_uuid = '{CANON_UUID}' ORDER BY" in api.sql[0]
+    assert api.lookups == ([] if saved_uuid else ["canon"])
+    assert materialized.sources[0]["run_uuid"] == CANON_UUID
 
 
 def test_analytics_query_posts_sql(monkeypatch) -> None:
@@ -366,6 +477,7 @@ def test_remote_prepare_always_validates_selection_then_uses_trace_cache(
     assert calls == [[("t1", 0), ("t2", 0)]]
     assert cohort.sources[0]["population"]["zero_reward"] == 1
     assert prepared["run_id"] == "canon"
+    assert prepared["run_uuid"] == CANON_UUID
     assert prepared["export_url"] == "https://api.test/v1/runs/canon/export/autofa"
     assert prepared["parquet_path"] == str(tmp_path / "traces.parquet")
     assert prepared["evidence_scope"].startswith("Original text traces: 2 rollouts")

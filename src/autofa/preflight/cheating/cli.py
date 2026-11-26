@@ -48,10 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "examples:\n"
             "  autofa preflight cheating\n"
-            "  autofa preflight cheating --api-run RUN_ID\n"
+            "  autofa preflight cheating --api-run RUN_UUID\n"
             "  autofa preflight cheating --input ./eval-results\n"
             "  autofa preflight cheating --model MODEL --benchmark BENCH --latest 3\n"
-            "  autofa preflight cheating --api-run RUN_ID --per-run 200 --max-reviews 20\n"
+            "  autofa preflight cheating --api-run RUN_UUID --per-run 200 --max-reviews 20\n"
             "  autofa preflight cheating --input SELECTION_ID"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

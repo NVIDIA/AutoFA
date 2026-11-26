@@ -14,6 +14,7 @@ from typing import Any
 
 LOCAL_REFERENCE_KIND = "local_evalrdl"
 _STORE_ID = re.compile(r"[0-9a-f]{64}\Z")
+_RUN_UUID = re.compile(r"[0-9a-f]{32}\Z")
 _LOCAL_VIEWER_PATH = re.compile(r"/traces/[0-9a-f]{64}/\Z")
 
 
@@ -87,7 +88,7 @@ def parse_evalrdl_run_url(value: str) -> tuple[str, str, str]:
     if parsed.fragment:
         pieces = parsed.fragment.strip("/").split("/")
         if len(pieces) != 2 or pieces[0] != "run" or not pieces[1]:
-            raise ValueError("EvalRDL inspector URL must end with #/run/<run_id>")
+            raise ValueError("EvalRDL inspector URL must end with #/run/<run_uuid>")
         run_id = urllib.parse.unquote(pieces[1]).strip()
         base_path = parsed.path.rstrip("/")
     else:
@@ -114,13 +115,19 @@ def make_reference_data(
     source_harness: str = "unknown",
     parquet_path: str | Path | None = None,
     evidence_scope: str = "",
+    run_uuid: Any = "",
 ) -> dict[str, str]:
-    """Build one normalized local reference record."""
+    """Build one normalized local reference record.
+
+    ``run_uuid``, when the catalog gave one, addresses the run in EvalRDL's viewer links.
+    """
     record = {
         "run_id": str(run_id).strip(),
         "export_url": str(export_url).strip(),
         "source_harness": _clean_harness(source_harness),
     }
+    if uuid := _run_uuid(run_uuid):
+        record["run_uuid"] = uuid
     if parquet_path:
         record["parquet_path"] = str(Path(parquet_path).expanduser().resolve())
     if evidence_scope:
@@ -227,6 +234,8 @@ def normalize_reference_data(
                 "run_id": run_id, "export_url": export_url,
                 "source_harness": _clean_harness(raw.get("source_harness")),
             }
+            if uuid := _run_uuid(raw.get("run_uuid")):
+                item["run_uuid"] = uuid
             key = ("cloud", run_id, export_url)
         if key in seen:
             continue
@@ -348,7 +357,7 @@ def inspect_url(reference: Mapping[str, Any]) -> str:
     scheme, netloc, base_path, run_id = parsed
     return (
         f"{scheme}://{netloc}{base_path}/#/run/"
-        f"{urllib.parse.quote(run_id, safe='')}"
+        f"{urllib.parse.quote(_viewer_run(reference, run_id), safe='')}"
     )
 
 
@@ -379,15 +388,15 @@ def rollout_url(
     if (parsed is None and not local_base) or not task_id or not repeat:
         return ""
     if local_base:
-        base, run_id = local_base, str(reference["run_id"]).strip()
+        base, run = local_base, str(reference["run_id"]).strip()
     else:
         scheme, netloc, base_path, run_id = parsed
-        base = f"{scheme}://{netloc}{base_path}/"
+        base, run = f"{scheme}://{netloc}{base_path}/", _viewer_run(reference, run_id)
     # The Data API SPA double-escapes slash characters inside task IDs.
     encoded_task = urllib.parse.quote(task_id, safe="").replace("%2F", "%252F")
     return (
         f"{base}#/rollout/"
-        f"{urllib.parse.quote(run_id, safe='')}/{encoded_task}/"
+        f"{urllib.parse.quote(run, safe='')}/{encoded_task}/"
         f"{urllib.parse.quote(repeat, safe='')}"
     )
 
@@ -493,6 +502,17 @@ def _parsed_reference(
     if base_path.endswith("/"):
         return None
     return parsed.scheme, parsed.netloc, base_path, run_id
+
+
+def _run_uuid(value: Any) -> str:
+    """A catalog run uuid (32 lowercase hex), or empty for anything else."""
+    text = str(value or "").strip()
+    return text if _RUN_UUID.fullmatch(text) else ""
+
+
+def _viewer_run(reference: Mapping[str, Any], run_id: str) -> str:
+    """EvalRDL's viewer addresses a run by uuid; a reference saved without one uses run_id."""
+    return _run_uuid(reference.get("run_uuid")) or run_id
 
 
 def _clean_harness(value: Any, *, default: str = "unknown") -> str:

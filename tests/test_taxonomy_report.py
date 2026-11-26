@@ -601,6 +601,31 @@ def test_report_links_to_manifest_source_api_with_optional_override(tmp_path: Pa
         report.build_report([results], viewer_url="javascript:alert(1)")
 
 
+@pytest.mark.parametrize("recorded_in", ["reference_data", "runs"])
+def test_report_links_address_the_run_uuid(tmp_path: Path, recorded_in: str) -> None:
+    run_uuid = "0123456789abcdef" * 2
+    results = _write_jsonl(tmp_path / "results.jsonl", [_result_record("task/a")])
+    if recorded_in == "reference_data":
+        _write_manifest(results, reference_data=[{
+            "run_id": "run-a", "run_uuid": run_uuid,
+            "export_url": "https://eval.example/v1/runs/run-a/export/autofa",
+        }])
+    else:
+        _write_manifest(results, runs=[{
+            "run_id": "run-a", "run_uuid": run_uuid, "base_url": "https://eval.example",
+        }])
+
+    data = report.build_report([results])
+    assert data["rollouts"][0]["viewer_url"].startswith(
+        f"https://eval.example/#/rollout/{run_uuid}/task%252Fa/0"
+    )
+    assert data["source_cells"][0]["run_viewer_url"] == f"https://eval.example/#/run/{run_uuid}"
+    overridden = report.build_report([results], viewer_url="https://viewer.example")
+    assert overridden["rollouts"][0]["viewer_url"].startswith(
+        f"https://viewer.example/#/rollout/{run_uuid}/"
+    )
+
+
 def test_incomplete_classification_manifest_is_skipped(tmp_path: Path) -> None:
     _write_jsonl(tmp_path / "results.jsonl", [_result_record("rollout-a")])
     (tmp_path / "results.manifest.json").write_text(json.dumps({

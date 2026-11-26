@@ -9,9 +9,9 @@ After [setup](../README.md#quick-start), prefix the commands below with
 
 ```bash
 autofa preflight cheating                                   # pick runs and a review count interactively
-autofa preflight cheating --api-run RUN_ID                  # a remote run
+autofa preflight cheating --api-run RUN_UUID                # a remote run
 autofa preflight cheating --input ./eval-results            # a local NeMo-Gym / Harbor run
-autofa preflight cheating --api-run RUN_ID --screen-only    # patterns only, no judge
+autofa preflight cheating --api-run RUN_UUID --screen-only  # patterns only, no judge
 ```
 
 In **New analysis** or **Continue from library**, open **Analysis settings > Analyses to run > Preflight >

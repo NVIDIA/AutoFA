@@ -465,6 +465,7 @@ def reuse_reference_data(
                 export_url=reference["export_url"],
                 source_harness=harness,
                 parquet_path=download.parquet_path,
+                run_uuid=download.run_uuid or reference.get("run_uuid"),
             )
         )
     if len(downloads) != len(references):

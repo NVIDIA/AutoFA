@@ -432,19 +432,52 @@ def test_saved_whole_run_selection_can_be_refined(monkeypatch, capsys) -> None:
     }])
     save_cohort(cohort)
 
+    run_uuid = "0123456789abcdef" * 2
+    sql: list[str] = []
+
     class Api:
         base_url = "https://runs.example"
 
         def __init__(self, *args, **kwargs):
-            self.pages = [[_scored("failed", 0.0)], []]
+            self.pages = [[_scored("failed", 0.0)]]
 
-        def query_analytics(self, sql):
+        def get_run(self, run_id):
+            return {"run_id": "run", "run_uuid": run_uuid}
+
+        def query_analytics(self, query):
+            sql.append(query)
             return {"rows": self.pages.pop(0)}
 
     monkeypatch.setattr(cli, "DataApiClient", Api)
 
     assert cli.main(["--input", cohort.id, "--dry-run"]) == 0
     assert "1 rollout(s) selected" in capsys.readouterr().out
+    # The selection was saved before run_uuid was recorded; the catalog supplies it.
+    [query] = sql
+    assert f"FROM di.rollouts WHERE run_uuid = '{run_uuid}' ORDER BY" in query
+
+
+def test_partial_reward_warning_queries_the_run_by_uuid(capsys) -> None:
+    run_uuid = "0123456789abcdef" * 2
+    sql: list[str] = []
+
+    class Api:
+        base_url = "https://runs.example"
+
+        def get_run(self, run_id):
+            return {"run_id": run_id, "run_uuid": run_uuid}
+
+        def query_analytics(self, query):
+            sql.append(query)
+            return {"rows": [{"task_id": "partial"}]}
+
+    cohort = Cohort(runs_where="", where="", rows=[], sources=[
+        {"kind": "remote", "base_url": "https://runs.example", "run_id": "run"},
+    ])
+    cli._warn_partial_rewards(cohort, Api())
+    [query] = sql
+    assert query.startswith(f"SELECT task_id FROM di.rollouts WHERE run_uuid = '{run_uuid}' AND ")
+    assert "partial rewards exist in run;" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("reward", [None, 1.0], ids=["unscored", "success"])

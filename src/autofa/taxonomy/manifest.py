@@ -328,6 +328,7 @@ def _runs(
         for field in (
             "kind",
             "base_url",
+            "run_uuid",
             "store_id",
             "dataset_contract",
             "metadata_watermark",
