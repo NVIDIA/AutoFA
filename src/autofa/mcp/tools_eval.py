@@ -1989,6 +1989,8 @@ def _evaluate_streaming(  # noqa: C901
         scores["eval_mode"] = ("round_validation" if round_fraction is not None
                                else "capped" if llm_capped and fn.name in llm_names
                                else "full" if max_items is None else "capped")
+        if scores["eval_mode"] == "capped":
+            scores["eval_limit"] = panel_frame_limit if fn.name in llm_names else max_items
         fn_scope_complete = scope_complete and not (
             llm_capped and fn.name in llm_names and panel_frame_limit < n_seen)
         scores["evaluation_scope_complete"] = bool(fn_scope_complete)

@@ -59,6 +59,8 @@ def evaluate_final_library(console: Console) -> dict:
 def _evaluate_final_library(console: Console) -> dict:
     from autofa.mcp.runtime import get_runtime
     from autofa.mcp.tools_eval import final_evaluate_functions
+    from autofa.metrics.final_validation_selection import CONTEXT_REFRESH_REASON
+    from autofa.session.llm_readiness import recheck_saved_routing
     from autofa.session.validation_recovery import prepare_recovered_validation
 
     console.print(
@@ -70,9 +72,20 @@ def _evaluate_final_library(console: Console) -> dict:
         "Press Ctrl+C only to cancel "
         "final scoring; checkpoints will be kept for resuming.[/dim]"
     )
+    recheck_saved_routing(get_runtime(), console=console)
     _refresh_final_evaluations(console)
     prepare_recovered_validation(get_runtime())
     selection = _prepare_final_selection(console)
+    # A preceding detector's review can establish a previously unknown classifier API.
+    # Recompute stale aggregates in their original scopes before reconsidering admission.
+    stale = {row["name"] for row in selection.get("unresolved", [])
+             if row.get("reason") == CONTEXT_REFRESH_REASON}
+    if stale and (refreshed := _refresh_final_evaluations(console, names=stale)):
+        retry = _prepare_final_selection(console, names=refreshed)
+        selection["selected_names"].extend(retry["selected_names"])
+        selection["skipped"].extend(retry["skipped"])
+        selection["unresolved"] = [row for row in selection["unresolved"]
+                                   if row["name"] not in refreshed] + retry["unresolved"]
     # The harness has closed its Live display by this point. Own the scoring
     # display here so progress remains visible for every harness and /stop path.
     with Progress(
@@ -137,7 +150,7 @@ def _evaluate_final_library(console: Console) -> dict:
     return outcome
 
 
-def _refresh_final_evaluations(console: Console) -> None:
+def _refresh_final_evaluations(console: Console, *, names: set[str] | None = None) -> list[str]:
     from autofa.mcp.runtime import get_runtime
     from autofa.session.evaluation_refresh import refresh_evaluation_contexts
 
@@ -159,12 +172,13 @@ def _refresh_final_evaluations(console: Console) -> None:
                              else "Refreshing saved scores"),
             )
 
-        result = refresh_evaluation_contexts(get_runtime(), progress=update)
+        result = refresh_evaluation_contexts(get_runtime(), progress=update, names=names)
         if not result["refreshed_names"]:
             progress.update(task_id, description="Saved scores checked", total=0, completed=0)
+        return result["refreshed_names"]
 
 
-def _prepare_final_selection(console: Console) -> dict:
+def _prepare_final_selection(console: Console, *, names: list[str] | None = None) -> dict:
     from autofa.mcp.runtime import get_runtime
     from autofa.metrics.final_validation_selection import prepare_final_validation
 
@@ -181,7 +195,7 @@ def _prepare_final_selection(console: Console) -> dict:
             progress.update(task_id, total=event["total"], completed=event["completed"],
                             detector=event.get("detector", ""))
 
-        selection = prepare_final_validation(get_runtime(), progress=update)
+        selection = prepare_final_validation(get_runtime(), progress=update, names=names)
     skipped = selection.get("skipped") or []
     console.print(Text(
         f"Full validation: {len(selection['selected_names'])} selected; {len(skipped)} skipped. "

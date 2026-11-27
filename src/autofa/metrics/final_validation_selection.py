@@ -26,6 +26,8 @@ from autofa.metrics.verdicts import (
 from autofa.util.cancellation import cancellation_guard, check_cancelled
 
 _SELECTION_VERSION = 1
+CONTEXT_REFRESH_REASON = ("Evaluation source/settings changed or cannot be verified; "
+                          "refresh checkpoint scoring.")
 # Presentation rebuilds task-support fields. Bind the raw measurements and review
 # that decide OK eligibility, not those derived fields or feedback formatting.
 _SCORE_KEYS = (
@@ -268,8 +270,7 @@ def _evaluation_problem(rt: Any, fn: Any) -> str | None:
     except (OSError, ValueError, TypeError) as exc:
         return f"Current evaluation source cannot be verified: {exc}"
     if not context or scores.get("evaluation_context") != context:
-        return ("Evaluation source/settings changed or cannot be verified; "
-                "refresh checkpoint scoring.")
+        return CONTEXT_REFRESH_REASON
     return None
 
 
