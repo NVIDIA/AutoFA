@@ -14,7 +14,7 @@ from copy import copy, deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from autofa.session.recovery import read_json
+from autofa.session.recovery import RunInterruptedError, read_json
 from autofa.util.atomic import atomic_write_json
 from autofa.util.cancellation import cancellation_guard, check_cancelled
 from autofa.util.model_errors import model_error_diagnostic
@@ -112,7 +112,7 @@ def recover_classifier(rt: Any, *, request: dict | None = None,
     baseline. All normal scoring/review remains required under the selected context.
     """
     from autofa.session import classifier_profiles as profiles
-    from autofa.session.detector_service import infrastructure_block, record_readiness
+    from autofa.session.detector_service import failure_kind, infrastructure_block, record_readiness
     from autofa.session.smoke_work import CALLS_PER_PANEL, LLM_ROWS, SmokeBudgetExceeded, digest
     from autofa.session.usage import usage_scope
     from autofa.util.model_budget import model_call_budget
@@ -154,7 +154,8 @@ def recover_classifier(rt: Any, *, request: dict | None = None,
                *state["profiles"][index + 1:]]
     # Permission is the saved run policy; zero comparison allowance explicitly
     # disables trying alternatives, but still permits a bounded same-route retry.
-    if not state["policy"]["comparison_limit"]:
+    if (not state["policy"]["comparison_limit"]
+            or incident.get("active", {}).get("category") == "provider_budget"):
         choices = choices[:1]
     path = rt.run.run_dir() / STATE_FILE
     policy = digest(state["policy"])
@@ -264,11 +265,22 @@ def recover_classifier(rt: Any, *, request: dict | None = None,
                     "next_action": "Re-evaluate affected detectors normally under the selected "
                                    "context; recovery controls establish no grade or recall."}
         except (Exception, SmokeBudgetExceeded) as exc:
+            failure = (exc.__cause__ if isinstance(exc, RunInterruptedError)
+                       and exc.__cause__ is not None else exc)
+            diagnostic = model_error_diagnostic(failure)
             with _LOCK, cancellation_guard():
                 saved = read_json(path)
                 attempt = next(row for row in saved["attempts"] if row["id"] == attempt_id)
-                attempt.update(status="failed", diagnostic=model_error_diagnostic(exc))
+                attempt.update(status="failed", diagnostic=diagnostic)
                 atomic_write_json(path, saved)
+            if failure_kind(failure) == "provider_budget":
+                if target["name"] == active_name:
+                    record_readiness(rt, {"available": False, "error": diagnostic["message"],
+                                          "diagnostic": diagnostic})
+                return {"recovered": False, "status": "infrastructure_blocked",
+                        "recovery": recovery_status(rt), "incident": infrastructure_block(rt),
+                        "next_action": f"Provider budget exhausted for {target['name']}. "
+                                       "Resume after the provider restores its budget."}
             if isinstance(exc, _RecoveryEvidenceChanged):
                 raise
         finally:

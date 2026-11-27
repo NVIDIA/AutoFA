@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
@@ -126,6 +127,7 @@ def _error_details(error: Any, *, model: str | None = None) -> tuple[str, str, b
         "restrictedToolsUnsupported": (
             "This Codex CLI cannot isolate judge tools. Update Codex before running judging."
         ),
+        "ephemeralReviewUnsupported": "Codex did not confirm an ephemeral review thread.",
         "compactionUnconfirmed": "Codex did not confirm that context compaction completed.",
         "threadBusy": "Codex is running this thread. Wait for it to finish before compacting.",
     }
@@ -558,7 +560,7 @@ class CodexTurnConnection:
     @asynccontextmanager
     async def use(
         self, *, cli_path: str | None, cwd: str, on_request: Callable,
-        on_notification: EventCallback, signature: str,
+        on_notification: EventCallback, signature: str, ephemeral_review: bool = False,
     ):
         if self._busy:
             raise RuntimeError("A persistent Codex review cannot run concurrent turns")
@@ -569,7 +571,7 @@ class CodexTurnConnection:
             if self.client is None:
                 self.client = CodexAppServer(
                     cli_path, cwd=cwd, on_request=on_request, on_notification=on_notification,
-                    isolated_state=True,
+                    isolated_state=not ephemeral_review,
                 )
                 self._signature = signature
                 await self.client.__aenter__()
@@ -673,6 +675,7 @@ async def run_codex_turn(  # noqa: C901
     """
     if connection is not None and not restricted:
         raise ValueError("Persistent Codex connections are limited to isolated evidence reviews")
+    ephemeral_review = restricted and os.environ.get("AUTOFA_CODEX_EPHEMERAL_REVIEW") == "1"
     specs = _normalize_tools(tools)
     names = {tool["name"] for tool in specs}
     thread_id = resume or ""
@@ -750,8 +753,9 @@ async def run_codex_turn(  # noqa: C901
             cwd=directory,
             on_request=dispatch,
             on_notification=forward_event,
+            ephemeral_review=ephemeral_review,
             signature=json.dumps(
-                [cli_path, directory, model, system_prompt, specs, effort],
+                [cli_path, directory, model, system_prompt, specs, effort, ephemeral_review],
                 sort_keys=True,
             ),
         )
@@ -761,7 +765,7 @@ async def run_codex_turn(  # noqa: C901
             cwd=directory,
             on_request=dispatch,
             on_notification=forward_event,
-            isolated_state=restricted and resume is None,
+            isolated_state=restricted and resume is None and not ephemeral_review,
         )
     )
     async with paid_async_dispatch(accounting.context), transport as client:
@@ -793,12 +797,17 @@ async def run_codex_turn(  # noqa: C901
                         "sandbox": "read-only" if restricted else "workspace-write",
                     }
                     if resume:
+                        if ephemeral_review:
+                            # Only the verified live connection above may continue a review.
+                            raise CodexAppServerError({"code": "restrictedToolsUnsupported"})
                         params.update(threadId=resume, excludeTurns=True)
                         started = await client.request("thread/resume", params)
                     else:
                         params.update(dynamicTools=specs, experimentalRawEvents=False)
                         if restricted:
                             params["environments"] = []
+                        if ephemeral_review:
+                            params["ephemeral"] = True
                         started = await client.request("thread/start", params)
                     thread_id = started.get("thread", {}).get("id", "")
                     if not isinstance(thread_id, str) or not thread_id:
@@ -807,6 +816,11 @@ async def run_codex_turn(  # noqa: C901
                         # Never run evidence judging unless environment removal
                         # was acknowledged by this live server.
                         raise CodexAppServerError({"code": "restrictedToolsUnsupported"})
+                    if ephemeral_review and (
+                        started["thread"].get("ephemeral") is not True
+                        or started["thread"].get("path") is not None
+                    ):
+                        raise CodexAppServerError({"code": "ephemeralReviewUnsupported"})
                     if connection is not None:
                         connection.thread_id = thread_id
                 if on_thread is not None:

@@ -18,6 +18,7 @@ from autofa.llm.endpoints import endpoint_for_config, endpoint_setup_help
 from autofa.llm.hub import humanize_hub_error, resolve_api_key_env
 from autofa.ui.errors import set_action_stage
 from autofa.ui.theme import GREEN, WARN
+from autofa.util.model_errors import model_error_diagnostic
 
 
 def _redact(message: str, secrets: list[str]) -> str:
@@ -66,6 +67,17 @@ def _secrets(rt: Any, hub: Any = None) -> list[str]:
     return values
 
 
+def _probe_failure(
+    error: Exception | str, secrets: list[str], diagnostic: dict | None = None,
+) -> dict:
+    if diagnostic is None:
+        diagnostic = model_error_diagnostic(error) if isinstance(error, Exception) else {}
+    return {"error": _safe_error(error, secrets), "diagnostic": {
+        key: _redact(value, secrets) if isinstance(value, str) else value
+        for key, value in diagnostic.items() if key in {"status_code", "code", "type"}
+    }}
+
+
 def check_llm_readiness(rt: Any, *, console: Console) -> dict[str, Any]:
     """Probe once and report unavailable versus uncertain without disabling a client."""
     set_action_stage("probe detector LLM endpoint")
@@ -94,7 +106,7 @@ def check_llm_readiness(rt: Any, *, console: Console) -> dict[str, Any]:
         if hub is None or getattr(hub, "available", True) is False:
             raise RuntimeError("Configured LLM endpoint client is unavailable")
     except Exception as exc:  # noqa: BLE001 - report the limitation before discovery
-        result["error"] = _safe_error(exc, _secrets(rt, hub))
+        result.update(_probe_failure(exc, _secrets(rt, hub)))
     else:
         result["configured"] = True
         try:
@@ -106,9 +118,10 @@ def check_llm_readiness(rt: Any, *, console: Console) -> dict[str, Any]:
                 result.update({field: getattr(probe, field) for field in ("label_api", "text_api")
                                if getattr(probe, field, None)})
             else:
-                result["error"] = _safe_error(probe.error or "Probe failed", _secrets(rt, hub))
+                result.update(_probe_failure(probe.error or "Probe failed", _secrets(rt, hub),
+                                             getattr(probe, "diagnostic", None)))
         except Exception as exc:  # noqa: BLE001 - a failed probe is not a missing key
-            result["error"] = _safe_error(exc, _secrets(rt, hub))
+            result.update(_probe_failure(exc, _secrets(rt, hub)))
         if result.get("error"):
             error = result["error"].lower()
             rejected = any(token in error for token in (
@@ -172,6 +185,31 @@ def _routing_message(readiness: dict[str, Any]) -> str:
                     f"using {labels[label_api]} for LLM detectors.")
         return f"{labels[label_api]} API selected; using it for LLM detectors."
     return ""
+
+
+def recheck_saved_routing(rt: Any, *, console: Console) -> None:
+    """Repeat discovery's endpoint probe before a fresh finalizer compares score contexts."""
+    from autofa.mcp.tools_eval import is_llm_detector
+    from autofa.session.recovery import read_json
+    from autofa.session.usage import usage_scope
+
+    if getattr(rt, "llm_readiness", None) is not None:
+        return
+    saved = read_json(rt.run.run_dir() / "llm_readiness.json")
+    if saved.get("available") is not True or saved.get("api") not in {
+        "auto", "responses", "decisions",
+    }:
+        return
+    endpoint = endpoint_for_config(rt.config)
+    if (saved.get("base_url"), saved.get("model"), saved["api"]) != (
+        endpoint.base_url, endpoint.model, endpoint.api
+    ):
+        return
+    if any(is_llm_detector(fn) for fn in rt.library.functions):
+        # Capability observations belong to this client. Reproduce them with the
+        # configured endpoint instead of copying a prior process's route flags.
+        with usage_scope(run_dir=rt.run.run_dir(), role="classifier_probe", phase="finalization"):
+            rt.llm_readiness = check_llm_readiness(rt, console=console)
 
 
 def check_and_recover_readiness(rt: Any, *, console: Console,

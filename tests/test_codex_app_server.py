@@ -91,7 +91,11 @@ for line in sys.stdin:
             environments = None if params.get('model') == 'old-cli' else []
             busy = os.environ.get('AUTOFA_TEST_COMPACT_MODE') == 'busy'
             thread_status = 'active' if busy else 'idle'
+            ephemeral = params.get('ephemeral', False)
+            if params.get('model') == 'ignores-ephemeral':
+                ephemeral = False
             reply(request, {'thread': {'id':'thread-1', 'environments': environments,
+                                      'ephemeral': ephemeral,
                                       'status': {'type': thread_status}},
                             'sandbox': {'type':'readOnly'}})
     elif method == 'thread/compact/start':
@@ -481,6 +485,45 @@ def test_request_error_and_eof_are_reported(fake_codex, model, code, retryable):
     assert result.error_code == code
     assert result.retryable is retryable
     assert "SECRET_TOKEN" not in result.error
+
+
+@pytest.mark.parametrize("model,ok", [("judge", True), ("ignores-ephemeral", False)])
+def test_ephemeral_review_verifies_server_before_model_turn(fake_codex, monkeypatch, model, ok):
+    monkeypatch.setenv("AUTOFA_CODEX_EPHEMERAL_REVIEW", "1")
+    result = asyncio.run(run_codex_turn(**_args(fake_codex, model=model, prompt="plain")))
+    started, = _sent(fake_codex, "thread/start")
+    assert started["ephemeral"] is True and started["environments"] == []
+    assert bool(_sent(fake_codex, "turn/start")) is ok
+    assert (result.status == "completed") is ok
+    if not ok:
+        assert result.error_code == "ephemeralReviewUnsupported"
+    argv, = [m["argv"] for m in _messages(fake_codex[1]) if "argv" in m]
+    assert not any(arg.startswith("sqlite_home=") for arg in argv)
+
+
+def test_ephemeral_review_continues_only_its_live_connection(fake_codex, monkeypatch):
+    monkeypatch.setenv("AUTOFA_CODEX_EPHEMERAL_REVIEW", "1")
+
+    async def review():
+        async with CodexTurnConnection() as connection:
+            args = _args(fake_codex, prompt="plain", connection=connection)
+            first = await run_codex_turn(**args)
+            assert first.status == "completed"
+            second = await run_codex_turn(**args, resume=first.thread_id)
+            assert second.status == "completed"
+
+    asyncio.run(review())
+    assert len(_sent(fake_codex, "thread/start")) == 1
+    assert not _sent(fake_codex, "thread/resume")
+    assert len(_sent(fake_codex, "turn/start")) == 2
+
+
+def test_ephemeral_review_rejects_persisted_resume(fake_codex, monkeypatch):
+    monkeypatch.setenv("AUTOFA_CODEX_EPHEMERAL_REVIEW", "1")
+    result = asyncio.run(run_codex_turn(**_args(fake_codex, resume="old-thread")))
+    assert result.error_code == "restrictedToolsUnsupported"
+    assert not _sent(fake_codex, "thread/resume")
+    assert not _sent(fake_codex, "turn/start")
 
 
 def test_restricted_fresh_turn_isolates_codex_state(fake_codex):

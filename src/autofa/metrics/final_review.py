@@ -538,15 +538,13 @@ def _finalize_one(  # noqa: C901
     # request or losing its checkpoints; reconcile any pending additions next.
     other_rows = [row for row in valid_rows if row["item_id"] not in cohort]
     merged_cohort = cohort
-    operation_id = fingerprint(
-        {
-            "identity": identity,
-            "items": [items[key] for key in cohort],
-            "localisations": [
-                localisations.get(key, fn.failure_localisations.get(key)) for key in cohort
-            ],
-        }
-    )
+    operation_evidence = {
+        "items": [items[key] for key in cohort],
+        "localisations": [
+            localisations.get(key, fn.failure_localisations.get(key)) for key in cohort
+        ],
+    }
+    operation_id = fingerprint({"identity": identity, **operation_evidence})
     receipt.update(identity=identity, operation_id=operation_id, item_ids=cohort,
                    policy_hash=policy,
                    cohort_policy=(previous_receipt.get("cohort_policy") if recovering
@@ -714,7 +712,22 @@ def _finalize_one(  # noqa: C901
                 history.append(deepcopy(row))
     if history:
         scores["behavior_verdict_history"] = history
+    # A checkpoint may use exactly the same verified cohort as the completed full
+    # review. Keep its original receipt only when both native identities and all
+    # cited verdicts still match. Every changed assessment follows ordinary invalidation.
+    previous_full = scores.get("final_review") or {}
+    keep_full = False
+    if (scope != "full_corpus" and compatible and not pending
+            and previous_full.get("status") == "complete"
+            and previous_full.get("item_ids") == cohort
+            and scores.get("behavior_verdicts") == result.get("verdicts")):
+        full_identity = fingerprint({**identity_inputs, "scope": "full_corpus", "policy": policy})
+        keep_full = (previous_full.get("identity") == full_identity
+                     and previous_full.get("operation_id") == fingerprint(
+                         {"identity": full_identity, **operation_evidence}))
     apply_review_result(scores, result, judge_harness=config["harness"])
+    if keep_full:
+        scores["final_review"] = previous_full
     scores.update(
         behavior_sample={**sample, "actual_n": len(merged_cohort)},
         behavior_review_phase="development",

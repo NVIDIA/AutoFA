@@ -220,6 +220,13 @@ uv run autofa supervise finalize --run RUN_ID
 ```
 
 Wait for the active discovery process to release its lock before invoking `finalize`.
+For LLM detectors, a fresh finalizer can recheck a previously verified endpoint
+before comparing evaluation settings. Refreshing a capped evaluation uses its original
+row limit. If that limit exceeds the current `max_eval_limit`, refresh stops before replacing
+the saved scores and asks you to restore a compatible maximum. A round checkpoint retains
+a completed full review when the cohort, evidence, review policy and verdicts still match
+the full review.
+
 Finalization reuses the native full-scoring/review checkpoints and preserves discovery
 rounds. It records selected/skipped detectors, unresolved evidence and retained-result
 completion separately. It does not publish automatically. A numerical target can remain

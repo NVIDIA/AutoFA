@@ -280,13 +280,15 @@ def test_smoke_control_schemas_are_advertised_in_both_harnesses(monkeypatch):
     jsonschema.validate(args, claude.input_schema)
 
 
-def _hub(monkeypatch, calls, *, fail_at=None, model="test", record=lambda kwargs: kwargs):
+def _hub(
+    monkeypatch, calls, *, fail_at=None, error=None, model="test", record=lambda kwargs: kwargs,
+):
     from autofa.llm.hub import HubLLM
 
     def create(**kwargs):
         calls.append(record(kwargs))
         if len(calls) == fail_at:
-            raise ConnectionError("connection reset")
+            raise error or ConnectionError("connection reset")
         return SimpleNamespace(choices=[
             SimpleNamespace(message=SimpleNamespace(content="yes"), finish_reason="stop"),
         ])
@@ -315,11 +317,19 @@ def test_large_diagnostics_fail_before_fetch_or_model(smoke_runtime, monkeypatch
     assert not result["ok"] and result["diagnostic_limit"] == limit
 
 
-def test_interrupted_smoke_reuses_only_completed_items_after_resume(smoke_runtime, monkeypatch):
+@pytest.mark.parametrize("budget_exhausted", [False, True])
+def test_interrupted_smoke_reuses_only_completed_items_after_resume(
+    smoke_runtime, monkeypatch, budget_exhausted,
+):
     from autofa.session.recovery import RunInterruptedError
 
     calls = []
-    _hub(monkeypatch, calls, fail_at=2)
+    error = None
+    if budget_exhausted:
+        error = RuntimeError("provider rejected request")
+        error.status_code = 422
+        error.body = {"error": {"type": "budget_exceeded"}}
+    _hub(monkeypatch, calls, fail_at=2, error=error)
     ids = ["positive", "recovered"]
     with pytest.raises(RunInterruptedError):
         tools_eval.smoke_test_feature(LLM_SOURCE, item_ids=ids)

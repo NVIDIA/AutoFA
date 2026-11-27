@@ -309,8 +309,74 @@ def test_context_refresh_reaggregates_saved_predictions_on_original_scope(
     assert len(rt.scores_history) == history_length + 1
 
 
+@pytest.mark.parametrize("source,sample", [
+    pytest.param(_LLM_SOURCE, 40, id="complete-frame"),
+    pytest.param(_LLM_SOURCE, 5, id="sampled-frame"),
+    pytest.param(_REGEX_SOURCE, 40, id="direct-detector"),
+])
+@pytest.mark.parametrize("legacy", [True, False])
+@pytest.mark.parametrize("lower_maximum", [False, True])
+def test_refresh_reuses_explicit_capped_frame_before_selected_full_scan(
+    tmp_path, monkeypatch, source, sample, legacy, lower_maximum,
+):
+    fn = FeatureFunction(name="flag", description="Failure behavior", source=source,
+                         kind="llm" if source == _LLM_SOURCE else "python")
+    rt = _runtime(tmp_path, monkeypatch, sample=sample, workers=1, functions=[fn], n=60)
+    assert tools_eval.evaluate_functions(names=[fn.name], limit=20)["ok"]
+    before = deepcopy(fn.scores)
+    assert before["eval_truncated"] and before["n_scored"] <= 20
+    if legacy:
+        fn.scores.pop("eval_limit", None)
+    else:
+        assert before["eval_limit"] == 20
+    fn.scores["evaluation_context"] = "legacy-context"
+    if lower_maximum:
+        rt.config.max_eval_limit = 10
+        rt.persist_library()
+        retained = deepcopy(fn.to_dict())
+        saved = rt.working_library_path().read_bytes()
+        with pytest.raises(RuntimeError, match="max_eval_limit"):
+            refresh_evaluation_contexts(rt)
+        assert fn.to_dict() == retained
+        assert rt.working_library_path().read_bytes() == saved
+        rt.config.max_eval_limit = 20
+    assert refresh_evaluation_contexts(rt)["refreshed_names"] == [fn.name]
+    for key in ("n_scored", "sampled", "evaluation_item_ids", "sample_frame_n",
+                "eval_mode", "evaluation_scope_complete", "a", "b", "c", "d"):
+        assert fn.scores.get(key) == before.get(key), key
+    assert fn.scores["evaluation_context"] == tools_eval._evaluation_context(rt)
+    assert tools_eval.final_evaluate_functions(names=[fn.name])["censused"] == [fn.name]
+    assert fn.scores["n_scored"] == 60 and fn.scores["evaluation_scope_complete"]
+
+
+def test_refresh_rechecks_current_route_after_first_evaluation(tmp_path, monkeypatch):
+    functions = [FeatureFunction(name=name, description=name, source=_LLM_SOURCE, kind="llm")
+                 for name in ("first", "current", "stale")]
+    rt = _runtime(tmp_path, monkeypatch, sample=10, workers=1, functions=functions)
+    assert tools_eval.evaluate_functions(names=[fn.name for fn in functions])["ok"]
+    functions[-1].scores["evaluation_context"] = "previous-source-context"
+    retained = deepcopy(functions[1].scores)
+    context, evaluate = tools_eval._evaluation_context, tools_eval._evaluate_functions
+    refreshed = []
+
+    def observed_context(runtime, **kwargs):
+        return context(runtime, **kwargs) if refreshed else "unverified-route"
+
+    def resolve_then_evaluate(**kwargs):
+        refreshed.extend(kwargs["names"])
+        return evaluate(**kwargs)
+
+    monkeypatch.setattr(tools_eval, "_evaluation_context", observed_context)
+    monkeypatch.setattr(tools_eval, "_evaluate_functions", resolve_then_evaluate)
+    assert refresh_evaluation_contexts(rt)["refreshed_names"] == ["first", "stale"]
+    assert refreshed == ["first", "stale"]
+    assert functions[1].scores == retained
+    assert all(fn.scores["evaluation_context"] == context(rt) for fn in functions)
+
+
+@pytest.mark.parametrize("provider_cap", [False, True])
 def test_interrupted_context_refresh_preserves_saved_measurements_until_resumed(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, provider_cap,
 ):
     rt, fn = _scored_runtime(tmp_path, monkeypatch)
     missing = _drop_one_prediction(rt)
@@ -323,10 +389,15 @@ def test_interrupted_context_refresh_preserves_saved_measurements_until_resumed(
 
     def interrupted(source, item, **kwargs):
         calls.append(item["_item_id"])
+        if provider_cap:
+            error = RuntimeError("HTTP 422: gateway budget rejected")
+            error.status_code = 422
+            error.body = {"error": {"type": "budget_exceeded", "code": "422"}}
+            raise error
         raise ConnectionResetError("Connection lost while refreshing the missing prediction")
 
     monkeypatch.setattr(tools_eval, "run_detector", interrupted)
-    with pytest.raises(RunInterruptedError):
+    with pytest.raises(RunInterruptedError, match="provider budget" if provider_cap else None):
         refresh_evaluation_contexts(rt)
     assert calls == [missing]
     assert fn.to_dict() == before
