@@ -549,6 +549,34 @@ def test_provider_budget_recovery_only_tries_the_selected_profile(rt, monkeypatc
     assert set(rt.calls) == {"base"}
 
 
+@pytest.mark.parametrize("startup", [False, True])
+@pytest.mark.parametrize("capped_profile", ["base", "strong"])
+def test_new_provider_budget_rejection_stops_recovery(rt, startup, capped_profile):
+    from autofa.session.classifier_recovery import recover_classifier
+    from autofa.session.detector_service import detector_service_status
+
+    _block_service(rt)
+
+    def rejected(request):
+        if request["model"] != capped_profile:
+            raise ConnectionError("Selected route unavailable")
+        error = RuntimeError("Provider budget rejected")
+        error.status_code = 422
+        error.body = {"error": {"type": "budget_exceeded", "code": "422"}}
+        raise error
+
+    rt.dispatch_hook = rejected
+    result = recover_classifier(rt, startup=True) if startup else compare(action="recover")
+    assert not result["recovered"] and result["status"] == "infrastructure_blocked"
+    assert "budget" in result["next_action"].lower()
+    assert rt.config.feature_model == "base" and not rt.run.classifier_profile_settings
+    assert rt.calls == (["base"] if capped_profile == "base" else ["base", "strong"])
+    saved = json.loads((rt.run.run_dir() / "classifier_availability_recovery.json").read_text())
+    assert saved["attempts"][-1]["diagnostic"]["type"] == "budget_exceeded"
+    if capped_profile == "base":
+        assert detector_service_status(rt.run.run_dir())["active"]["category"] == "provider_budget"
+
+
 def test_recovery_preserves_user_stop_and_existing_round_budget(rt):
     from autofa.session.supervision import SupervisorInterrupted, lifecycle_request
 

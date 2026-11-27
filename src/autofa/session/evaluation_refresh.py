@@ -9,6 +9,7 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any
 
+from autofa.defaults import setting_value
 from autofa.ui.evaluation_progress import evaluation_progress
 from autofa.util.cancellation import check_cancelled
 
@@ -40,7 +41,7 @@ def refresh_evaluation_contexts(
     Missing contexts and never-evaluated candidates retain ordinary eligibility
     handling; this helper does not manufacture a prior evaluation scope for them.
     """
-    from autofa.mcp.tools_eval import _evaluate_functions, _evaluation_context
+    from autofa.mcp.tools_eval import _evaluate_functions, _evaluation_context, resolve_eval_limit
 
     candidates = [fn for fn in rt.library.functions
                   if (names is None or fn.name in names)
@@ -61,7 +62,13 @@ def refresh_evaluation_contexts(
         if scores.get("eval_mode") == "capped" and (
             scores.get("eval_limit") is not None or scores.get("eval_truncated") is True
         ):
-            kwargs.update(mode="capped", limit=_saved_capped_limit(scores))
+            limit = _saved_capped_limit(scores)
+            maximum = setting_value(rt.config, "max_eval_limit")
+            if resolve_eval_limit(limit, cfg_max=maximum) != limit:
+                raise RuntimeError(
+                    f"Cannot refresh {fn.name} with its saved row limit of {limit}. "
+                    f"Restore max_eval_limit to at least {limit} before refreshing.")
+            kwargs.update(mode="capped", limit=limit)
         elif scores.get("sampled") is False:
             kwargs["mode"] = "full"
         elif (scores.get("round_validation") or {}).get("fraction") is not None:

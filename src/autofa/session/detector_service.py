@@ -39,7 +39,7 @@ def raise_if_budget_exhausted(error: Exception) -> None:
         raise RunInterruptedError(
             "Classifier provider budget exhausted. Completed results are saved. "
             "Resume on the same route after the provider restores its budget."
-        ) from None
+        ) from error
 
 
 def failure_kind(error: BaseException) -> str:
@@ -139,6 +139,11 @@ def record_readiness(rt: Any, readiness: dict, *, blocking: bool = True) -> None
     endpoint = endpoint_for_config(rt.config)
     error = (None if readiness.get("available") is True else
              RuntimeError(readiness.get("error") or "Detector service readiness unverified"))
+    if error is not None:
+        diagnostic = readiness.get("diagnostic") or {}
+        for attribute in ("status_code", "code", "type"):
+            if attribute in diagnostic:
+                setattr(error, attribute, diagnostic[attribute])
     observe_dispatch({"run_dir": str(rt.run.run_dir()),
                       "role": "detector" if blocking else "classifier_probe",
                       "phase": "discovery", "round_index": rt.run.round},

@@ -315,8 +315,9 @@ def test_context_refresh_reaggregates_saved_predictions_on_original_scope(
     pytest.param(_REGEX_SOURCE, 40, id="direct-detector"),
 ])
 @pytest.mark.parametrize("legacy", [True, False])
+@pytest.mark.parametrize("lower_maximum", [False, True])
 def test_refresh_reuses_explicit_capped_frame_before_selected_full_scan(
-    tmp_path, monkeypatch, source, sample, legacy,
+    tmp_path, monkeypatch, source, sample, legacy, lower_maximum,
 ):
     fn = FeatureFunction(name="flag", description="Failure behavior", source=source,
                          kind="llm" if source == _LLM_SOURCE else "python")
@@ -329,6 +330,16 @@ def test_refresh_reuses_explicit_capped_frame_before_selected_full_scan(
     else:
         assert before["eval_limit"] == 20
     fn.scores["evaluation_context"] = "legacy-context"
+    if lower_maximum:
+        rt.config.max_eval_limit = 10
+        rt.persist_library()
+        retained = deepcopy(fn.to_dict())
+        saved = rt.working_library_path().read_bytes()
+        with pytest.raises(RuntimeError, match="max_eval_limit"):
+            refresh_evaluation_contexts(rt)
+        assert fn.to_dict() == retained
+        assert rt.working_library_path().read_bytes() == saved
+        rt.config.max_eval_limit = 20
     assert refresh_evaluation_contexts(rt)["refreshed_names"] == [fn.name]
     for key in ("n_scored", "sampled", "evaluation_item_ids", "sample_frame_n",
                 "eval_mode", "evaluation_scope_complete", "a", "b", "c", "d"):

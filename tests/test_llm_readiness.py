@@ -187,6 +187,43 @@ def test_raised_probe_error_is_humanized_without_disabling_client(startup, kind)
         assert readiness["error"] == "auth failed (HTTP 401) — check API key"
 
 
+@pytest.mark.parametrize("raised", [False, True])
+@pytest.mark.parametrize("status,code,category", [
+    (422, "budget_exceeded", "provider_budget"),
+    (401, "invalid_api_key", "authentication"),
+])
+def test_startup_probe_retains_structured_failure(startup, raised, status, code, category):
+    from autofa.llm.hub import HubLLM
+
+    rt, console = startup
+    rt.run = RunConfig(run_id="startup-rejection", parquet_paths=[], model_id="test",
+                       benchmarks=["bench"])
+    rt.run.save()
+    secret = "private-client-credential"  # pragma: allowlist secret
+    error = http_error(status, {"type": code, "code": str(status),
+                                "message": f"Rejected for {secret}"})
+    if raised:
+        hub, _ = configured(rt, error=error)
+        hub._client = SimpleNamespace(api_key=secret)
+    else:
+        def reject(**kwargs):
+            raise error
+
+        sdk = SimpleNamespace(api_key=secret, chat=SimpleNamespace(
+            completions=SimpleNamespace(create=reject)))
+        hub = HubLLM(sdk, model="test", api="chat_completions")
+        rt.ensure_hub_llm = lambda: hub
+    readiness = check_llm_readiness(rt, console=console)
+    assert readiness["diagnostic"]["status_code"] == status
+    assert readiness["diagnostic"]["type"] == code
+    assert secret not in json.dumps(readiness)
+    service.record_readiness(rt, readiness)
+    health = service.detector_service_status(rt.run.run_dir())
+    assert health["infrastructure_blocked"] and health["active"]["category"] == category
+    assert health["active"]["diagnostic"]["type"] == code
+    assert ("same route" in health["next_action"]) == (category == "provider_budget")
+
+
 def test_reachable_hub_is_ready_without_echoing_its_key(startup, monkeypatch):
     rt, console = startup
     monkeypatch.setenv("INFERENCE_HUB_API_KEY", "private-test-hub-key")

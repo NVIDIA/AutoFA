@@ -29,6 +29,7 @@ from autofa.llm.endpoints import (
     completion_options,
     validate_base_url,
 )
+from autofa.util.model_errors import model_error_diagnostic
 
 log = logging.getLogger(__name__)
 
@@ -384,6 +385,7 @@ class HubProbeResult:
     slow: bool = False
     label_api: str | None = None
     text_api: str | None = None
+    diagnostic: dict[str, str | int] | None = None
 
 
 def humanize_hub_error(exc: BaseException) -> str:
@@ -765,6 +767,7 @@ class HubLLM:
                 model=self.model,
                 latency_s=latency,
                 error=humanize_hub_error(e),
+                diagnostic=model_error_diagnostic(e),
                 label_api=self.label_api, text_api=self.text_api,
             )
         finally:
