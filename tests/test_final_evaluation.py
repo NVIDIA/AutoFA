@@ -309,8 +309,9 @@ def test_context_refresh_reaggregates_saved_predictions_on_original_scope(
     assert len(rt.scores_history) == history_length + 1
 
 
+@pytest.mark.parametrize("provider_cap", [False, True])
 def test_interrupted_context_refresh_preserves_saved_measurements_until_resumed(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, provider_cap,
 ):
     rt, fn = _scored_runtime(tmp_path, monkeypatch)
     missing = _drop_one_prediction(rt)
@@ -323,10 +324,15 @@ def test_interrupted_context_refresh_preserves_saved_measurements_until_resumed(
 
     def interrupted(source, item, **kwargs):
         calls.append(item["_item_id"])
+        if provider_cap:
+            error = RuntimeError("HTTP 422: gateway budget rejected")
+            error.status_code = 422
+            error.body = {"error": {"type": "budget_exceeded", "code": "422"}}
+            raise error
         raise ConnectionResetError("Connection lost while refreshing the missing prediction")
 
     monkeypatch.setattr(tools_eval, "run_detector", interrupted)
-    with pytest.raises(RunInterruptedError):
+    with pytest.raises(RunInterruptedError, match="provider budget" if provider_cap else None):
         refresh_evaluation_contexts(rt)
     assert calls == [missing]
     assert fn.to_dict() == before

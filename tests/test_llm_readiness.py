@@ -368,6 +368,22 @@ def test_confirmed_configuration_failures_still_block_immediately(rt, body):
     assert summary['active']['category'] == 'configuration'
 
 
+def test_provider_budget_and_previously_saved_budget_rejection_block_until_recovery(rt):
+    observe(rt)
+    observe(rt, error=http_error(422, {'type': 'budget_exceeded', 'code': '422'}))
+    folder = rt.run.run_dir()
+    summary = service.detector_service_status(folder)
+    assert summary['infrastructure_blocked'] and summary['active']['category'] == 'provider_budget'
+    path = folder / service.STATE_FILE
+    state = json.loads(path.read_text())
+    state['blocked'] = False
+    state['routes'][state['active_route']]['category'] = 'request_rejected'
+    path.write_text(json.dumps(state))
+    assert service.infrastructure_block(rt)['active']['category'] == 'provider_budget'
+    observe(rt)
+    assert service.infrastructure_block(rt) is None
+
+
 def test_readiness_rejections_still_block_immediately(rt):
     observe(rt, error=http_error(422), readiness_failure=True)
     assert service.detector_service_status(rt.run.run_dir())['infrastructure_blocked']

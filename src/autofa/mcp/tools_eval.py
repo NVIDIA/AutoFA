@@ -325,9 +325,11 @@ def _smoke_test_feature(  # noqa: C901
             except DetectorAbstained as exc:
                 result = {"item_id": item_id, "status": "abstained", "reason": str(exc)}
             except Exception as exc:  # noqa: BLE001
+                from autofa.session.detector_service import raise_if_budget_exhausted
                 from autofa.session.recovery import RunInterruptedError
                 from autofa.util.transient import is_transient_error
 
+                raise_if_budget_exhausted(exc)
                 if not isinstance(exc, RegexTimeoutError) and is_transient_error(exc):
                     raise RunInterruptedError(
                         "Diagnostic model connection interrupted. Completed item results "
@@ -1240,6 +1242,9 @@ def _iter_scored_items(
                 cache.put(cache.key(fn.source, deps, item, bundle=bundle), pred, record)
             return fn, item, pred, record, None
         except Exception as exc:  # noqa: BLE001
+            from autofa.session.detector_service import raise_if_budget_exhausted
+
+            raise_if_budget_exhausted(exc)
             if not isinstance(exc, RegexTimeoutError) and is_transient_error(exc):
                 from autofa.session.status_log import emit_runtime_status
                 from autofa.util.model_errors import model_error_diagnostic

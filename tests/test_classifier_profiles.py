@@ -527,6 +527,28 @@ def test_availability_controls_cannot_regress_or_assign_grades(rt):
     assert len(rt.calls) == count  # A round change grants no new attempt.
 
 
+def test_provider_budget_recovery_only_tries_the_selected_profile(rt, monkeypatch):
+    from autofa.session import detector_service
+
+    _block_service(rt)
+    original = detector_service.infrastructure_block
+
+    def budget_incident(runtime):
+        incident = original(runtime)
+        return {**incident, "active": {**incident["active"], "category": "provider_budget"}}
+
+    def still_unavailable(request):
+        raise ConnectionError("Baseline unavailable")
+
+    monkeypatch.setattr(detector_service, "infrastructure_block", budget_incident)
+    rt.dispatch_hook = still_unavailable
+    result = compare(action="recover")
+    assert not result["recovered"]
+    assert rt.config.feature_model == "base"
+    assert not rt.run.classifier_profile_settings
+    assert set(rt.calls) == {"base"}
+
+
 def test_recovery_preserves_user_stop_and_existing_round_budget(rt):
     from autofa.session.supervision import SupervisorInterrupted, lifecycle_request
 
