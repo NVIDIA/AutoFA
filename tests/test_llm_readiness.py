@@ -16,7 +16,11 @@ from autofa.harness.claude import TurnResult
 from autofa.llm.hub import HubProbeResult, humanize_hub_error
 from autofa.session import detector_service as service
 from autofa.session import runner
-from autofa.session.llm_readiness import check_llm_readiness, llm_readiness_guidance
+from autofa.session.llm_readiness import (
+    check_llm_readiness,
+    llm_readiness_guidance,
+    recheck_saved_routing,
+)
 from autofa.util.atomic import atomic_write_json
 
 from support.discovery import interactive as interactive
@@ -79,6 +83,38 @@ def test_verified_route_is_given_to_agent(startup, label_api):
     readiness = check_llm_readiness(rt, console=console)
     assert readiness["label_api"] == label_api and readiness["text_api"] == "responses"
     assert f"label_api={label_api}" in llm_readiness_guidance(readiness)
+
+
+@pytest.mark.parametrize("api", ["auto", "responses", "decisions"])
+@pytest.mark.parametrize("case", [
+    "fresh", "failed_probe", "already_probed", "model_changed", "empty_library", "no_receipt",
+])
+def test_fresh_finalizer_rechecks_the_saved_endpoint_capability(startup, tmp_path, case, api):
+    from autofa.llm.endpoints import endpoint_for_config
+
+    rt, console = startup
+    rt.config.feature_api = api
+    endpoint = endpoint_for_config(rt.config)
+    saved = {"available": True, "api": endpoint.api, "base_url": endpoint.base_url,
+             "model": endpoint.model, "label_api": "old-label", "text_api": "old-text"}
+    if case == "model_changed":
+        saved["model"] = "previous-model"
+    if case != "no_receipt":
+        atomic_write_json(tmp_path / "llm_readiness.json", saved)
+    rt.run = SimpleNamespace(run_dir=lambda: tmp_path)
+    rt.library = SimpleNamespace(functions=[] if case == "empty_library"
+                                 else [SimpleNamespace(kind="llm")])
+    rt.llm_readiness = {"available": True} if case == "already_probed" else None
+    _, calls = configured(rt, error=TimeoutError("timed out") if case == "failed_probe" else None,
+                          result=HubProbeResult(ok=True, model=endpoint.model, latency_s=0.1,
+                                                label_api="decisions", text_api="responses"))
+    recheck_saved_routing(rt, console=console)
+    assert len(calls) == int(case in {"fresh", "failed_probe"})
+    if case == "fresh":
+        assert (rt.llm_readiness["label_api"], rt.llm_readiness["text_api"]) == (
+            "decisions", "responses")
+    elif case == "failed_probe":
+        assert rt.llm_readiness["status"] == "unverified"
 
 
 @pytest.mark.parametrize("missing", ["credentials", "client"])
@@ -366,6 +402,30 @@ def test_confirmed_configuration_failures_still_block_immediately(rt, body):
     summary = service.detector_service_status(rt.run.run_dir())
     assert summary['infrastructure_blocked']
     assert summary['active']['category'] == 'configuration'
+
+
+@pytest.mark.parametrize("status,body", [
+    (402, {"type": "budget_exceeded"}),
+    (403, {"code": "insufficient_quota"}),
+    (422, {"type": "budget_exceeded", "code": "422"}),
+    (429, {"code": "insufficient_quota"}),
+])
+def test_provider_budget_and_previously_saved_budget_rejection_block_until_recovery(
+    rt, status, body,
+):
+    observe(rt)
+    observe(rt, error=http_error(status, body))
+    folder = rt.run.run_dir()
+    summary = service.detector_service_status(folder)
+    assert summary['infrastructure_blocked'] and summary['active']['category'] == 'provider_budget'
+    path = folder / service.STATE_FILE
+    state = json.loads(path.read_text())
+    state['blocked'] = False
+    state['routes'][state['active_route']]['category'] = 'request_rejected'
+    path.write_text(json.dumps(state))
+    assert service.infrastructure_block(rt)['active']['category'] == 'provider_budget'
+    observe(rt)
+    assert service.infrastructure_block(rt) is None
 
 
 def test_readiness_rejections_still_block_immediately(rt):

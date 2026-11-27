@@ -22,10 +22,30 @@ _LOCK = threading.RLock()
 _PHASES = {"discovery", "round_validation", "finalization"}
 
 
+def _hard_budget(diagnostic: dict) -> bool:
+    # Ordinary HTTP 422s include item-specific input errors. Only a structured
+    # account-level rejection establishes that retrying other items cannot help.
+    return diagnostic.get("status_code") in {402, 403, 422, 429} and any(
+        diagnostic.get(key) in ("budget_exceeded", "insufficient_quota")
+        for key in ("code", "type")
+    )
+
+
+def raise_if_budget_exhausted(error: Exception) -> None:
+    """Interrupt the batch when the provider rejects further account spending."""
+    if _hard_budget(model_error_diagnostic(error)):
+        raise RuntimeError(
+            "Classifier provider budget exhausted. Completed results are saved. "
+            "Resume on the same route after the provider restores its budget."
+        ) from None
+
+
 def failure_kind(error: BaseException) -> str:
     """Classify transport/configuration failures separately from local detector faults."""
     status = getattr(error, "status_code", None)
     diagnostic = model_error_diagnostic(error)
+    if _hard_budget(diagnostic):
+        return "provider_budget"
     text = (str(error) + " " + diagnostic["message"]).lower()
     code = str(diagnostic.get("code", "")).lower()
     param = str(diagnostic.get("param", "")).lower()
@@ -93,7 +113,7 @@ def observe_dispatch(context: dict | None, *, model: str, endpoint: str | None,
         routes[key] = row
         # Probes for inactive alternatives cannot block a working selected service.
         service_failure = error is not None and (readiness_failure or row.get("category") in {
-            "authentication", "configuration", "transport", "rate_limit",
+            "authentication", "configuration", "transport", "rate_limit", "provider_budget",
         })
         if context["role"] == "detector" and (error is None or service_failure):
             state["active_route"] = key
@@ -132,14 +152,25 @@ def detector_service_status(run_dir: Path) -> dict:
         return {"status": "unobserved", "infrastructure_blocked": False}
     active = state.get("routes", {}).get(state.get("active_route"), {})
     blocked = bool(state.get("blocked"))
+    # Previously recorded gateway caps were classified as item rejections.
+    # Ignore historical diagnostics once this same route has succeeded again.
+    if active.get("failure_streak", 0) and _hard_budget(active.get("diagnostic") or {}):
+        active = {**active, "category": "provider_budget"}
+        blocked = True
+    if blocked and active.get("category") == "provider_budget":
+        next_action = ("Wait for the current provider budget to reset or be restored, "
+                       "then verify the same route.")
+    elif blocked:
+        next_action = ("Use classifier_profiles(action='recover') with unchanged positive/"
+                       "negative source controls, or request a bounded wait/configuration "
+                       "change. Unavailable calls are unresolved work, not negative matches.")
+    else:
+        next_action = None
     return {"status": "infrastructure_blocked" if blocked else "ready",
             "infrastructure_blocked": blocked, "incident_id": state.get("active_route"),
             "updated_at": state.get("updated_at"), "active": active,
             "route_count": len(state.get("routes", {})),
-            "next_action": ("Use classifier_profiles(action='recover') with unchanged positive/"
-                            "negative source controls, or request a bounded wait/configuration "
-                            "change. Unavailable calls are unresolved work, not negative matches."
-                            if blocked else None)}
+            "next_action": next_action}
 
 
 def infrastructure_block(rt: Any) -> dict | None:

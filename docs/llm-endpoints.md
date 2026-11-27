@@ -339,6 +339,13 @@ checkpoints so predictions from a different reasoning setting are not reused.
 
 ### Permitted classifier alternatives
 
+When the provider reports structured `budget_exceeded` or `insufficient_quota`
+errors, AutoFA interrupts scoring and smoke tests while retaining completed
+predictions. Availability recovery checks the currently selected classifier after
+the allowance is restored. In-flight requests can still finish before the batch
+releases its workers. Saved service incidents from older runs are recognized from
+their structured diagnostics.
+
 `autofa preflight classifiers` reads configured detector routes and credential-variable
 presence without initializing settings or calling a model. The default alternatives are the
 Luna medium, Sol medium and Sol high profiles described in

@@ -154,7 +154,8 @@ def recover_classifier(rt: Any, *, request: dict | None = None,
                *state["profiles"][index + 1:]]
     # Permission is the saved run policy; zero comparison allowance explicitly
     # disables trying alternatives, but still permits a bounded same-route retry.
-    if not state["policy"]["comparison_limit"]:
+    if (not state["policy"]["comparison_limit"]
+            or incident.get("active", {}).get("category") == "provider_budget"):
         choices = choices[:1]
     path = rt.run.run_dir() / STATE_FILE
     policy = digest(state["policy"])

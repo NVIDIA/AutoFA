@@ -14,6 +14,13 @@ in **Settings > LLM endpoints > AutoFA harness**: `codex login` or
 `CLAUDE_CODE_EXECPATH`. The behavior judge uses its selected harness's credentials;
 LLM detectors use the separately configured [LLM endpoint](llm-endpoints.md#llm-endpoints).
 
+For Codex behavioral reviews on hosts where creating a fresh SQLite index times out,
+set `AUTOFA_CODEX_EPHEMERAL_REVIEW=1` for the AutoFA process. This starts a fresh
+ephemeral Codex thread for each review and verifies that the server acknowledged
+both ephemeral mode and an empty tool environment before submitting evidence.
+AutoFA retains its own review receipts. A bounded follow-up can continue the
+same live review thread.
+
 Save keys in the project's `.env`, or share them across checkouts through
 `~/.autofa/.env` (`$AUTOFA_HOME/.env` for a separate profile):
 

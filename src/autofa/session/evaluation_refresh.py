@@ -13,8 +13,24 @@ from autofa.ui.evaluation_progress import evaluation_progress
 from autofa.util.cancellation import check_cancelled
 
 
+def _saved_capped_limit(scores: dict) -> int:
+    limit = scores.get("eval_limit")
+    if limit is None and scores.get("evaluation_checkpoint_complete") is True:
+        # Older checkpoints omit the explicit cap. A completed, truncated
+        # checkpoint exhausted that cap, even when every row in its frame ran.
+        if scores.get("sampled") is True:
+            limit = scores.get("sample_frame_n")
+        elif scores.get("sampled") is False:
+            resolved, unresolved = scores.get("n_scored"), scores.get("n_unresolved")
+            if type(resolved) is int and type(unresolved) is int:
+                limit = resolved + unresolved
+    if type(limit) is not int or limit < 1:
+        raise RuntimeError("Cannot refresh capped evaluation without its original row limit.")
+    return limit
+
+
 def refresh_evaluation_contexts(
-    rt: Any, *, progress: Callable[[dict], None] | None = None,
+    rt: Any, *, progress: Callable[[dict], None] | None = None, names: set[str] | None = None,
 ) -> dict[str, Any]:
     """Refresh each previously scored scope, reusing ordinary prediction checkpoints.
 
@@ -27,22 +43,26 @@ def refresh_evaluation_contexts(
     from autofa.mcp.tools_eval import _evaluate_functions, _evaluation_context
 
     candidates = [fn for fn in rt.library.functions
-                  if (fn.scores or {}).get("evaluated") is True
+                  if (names is None or fn.name in names)
+                  and (fn.scores or {}).get("evaluated") is True
                   and (fn.scores or {}).get("evaluation_context")]
-    if not candidates:
-        return {"refreshed_names": []}
-    context = _evaluation_context(rt)
-    if not context:
-        raise RuntimeError(
-            "Cannot refresh saved evaluation: current source identity is unavailable.")
     refreshed = []
     for fn in candidates:
         check_cancelled()
+        # A preceding detector call can resolve a previously unknown API capability.
+        context = _evaluation_context(rt)
+        if not context:
+            raise RuntimeError(
+                "Cannot refresh saved evaluation: current source identity is unavailable.")
         scores = fn.scores or {}
         if scores.get("evaluation_context") == context:
             continue
         kwargs = {"names": [fn.name], "_finalizing": True}
-        if scores.get("sampled") is False:
+        if scores.get("eval_mode") == "capped" and (
+            scores.get("eval_limit") is not None or scores.get("eval_truncated") is True
+        ):
+            kwargs.update(mode="capped", limit=_saved_capped_limit(scores))
+        elif scores.get("sampled") is False:
             kwargs["mode"] = "full"
         elif (scores.get("round_validation") or {}).get("fraction") is not None:
             fraction = scores["round_validation"]["fraction"]

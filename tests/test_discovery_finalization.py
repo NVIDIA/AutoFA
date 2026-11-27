@@ -245,7 +245,7 @@ def test_finalization_refreshes_before_recovered_admission_and_candidate_selecti
     events = []
     output = StringIO()
 
-    def refresh(runtime, *, progress):
+    def refresh(runtime, *, progress, names=None):
         assert runtime is rt and not events
         assert callable(progress)
         events.append("refresh")
@@ -255,7 +255,7 @@ def test_finalization_refreshes_before_recovered_admission_and_candidate_selecti
         assert runtime is rt and events == ["refresh"]
         events.append("recovered_admission")
 
-    def select(runtime, *, progress):
+    def select(runtime, *, progress, names=None):
         assert runtime is rt and events == ["refresh", "recovered_admission"]
         events.append("selection")
         return {"selected_names": ["resumed"], "skipped": [], "unresolved": []}
@@ -283,6 +283,40 @@ def test_finalization_refreshes_before_recovered_admission_and_candidate_selecti
     finalization._evaluate_final_library(Console(file=output, width=180))
     assert events == ["refresh", "recovered_admission", "selection", "scan", "review"]
     assert "Final validation complete for selected detectors" in output.getvalue()
+
+
+@pytest.mark.parametrize("still_stale", [False, True])
+def test_finalization_refreshes_only_stale_candidates_once(
+    empty_finalization_runtime, monkeypatch, still_stale,
+):
+    from autofa.metrics.final_validation_selection import CONTEXT_REFRESH_REASON
+
+    stale = {"name": "later", "reason": CONTEXT_REFRESH_REASON}
+    gap = {"name": "other", "reason": "Unresolved claim review"}
+    refreshes, selections = [], []
+
+    def refresh(rt, *, progress, names):
+        refreshes.append(names)
+        return {"refreshed_names": sorted(names or [])}
+
+    def select(rt, *, progress, names):
+        selections.append(names)
+        if names is None:
+            return {"selected_names": ["first"], "skipped": [], "unresolved": [stale, gap]}
+        assert names == ["later"]
+        return {"selected_names": [] if still_stale else names, "skipped": [],
+                "unresolved": [stale] if still_stale else []}
+
+    monkeypatch.setattr("autofa.session.evaluation_refresh.refresh_evaluation_contexts", refresh)
+    monkeypatch.setattr("autofa.metrics.final_validation_selection.prepare_final_validation",
+                        select)
+    monkeypatch.setattr("autofa.mcp.tools_eval.final_evaluate_functions",
+                        lambda *, names: {"ok": True, "n": 0})
+    outcome = finalization._evaluate_final_library(Console(file=StringIO()))
+    assert refreshes == [None, {"later"}]
+    assert selections == [None, ["later"]]
+    assert outcome["selected"] == (["first"] if still_stale else ["first", "later"])
+    assert outcome["review"]["unresolved"] == ([gap, stale] if still_stale else [gap])
 
 
 def test_finalization_persists_recovered_scores_and_renders_them_in_html(

@@ -26,6 +26,33 @@ from support.evaluation import (
 from support.judge import _reply, _review, local_reply, local_review
 
 
+@pytest.mark.parametrize("change", ["none", "operation_id", "source_content", "identity"])
+@pytest.mark.parametrize("scope", ["round_checkpoint", "selection_checkpoint"])
+def test_round_preserves_only_identical_native_full_review(
+    tmp_path, monkeypatch, stub_claim_compiler, change, scope,
+):
+    rt, fn = runtime(tmp_path, monkeypatch)
+    monkeypatch.setattr(claude_judge, "_run_review", lambda **kw: reply(kw["review"], "supported"))
+    final, _ = final_review._finalize_one(rt, fn)
+    assert final["status"] == "complete"
+    original = deepcopy(final)
+    if change in {"operation_id", "identity"}:
+        fn.scores["final_review"][change] = "obsolete"
+    if change == "source_content":
+        item = next(i for i in rt.dataset._fake_items if i["_item_id"] == final["item_ids"][0])
+        item["response_text"] = "BAD changed evidence"
+        monkeypatch.setattr(claude_judge, "_run_review", lambda **kw: reply(kw["review"]))
+    else:
+        monkeypatch.setattr(claude_judge, "_run_review", forbid)
+    checkpoint, _ = final_review._finalize_one(rt, fn, scope=scope)
+    assert checkpoint["scope"] == scope
+    if change == "none":
+        assert checkpoint["status"] == "complete"
+        assert fn.scores["final_review"] == original
+    else:
+        assert "final_review" not in fn.scores
+
+
 def _interrupt_second_review(monkeypatch, calls, failed=()):
     """Interrupt the second review session once; reject every other reviewed case."""
 

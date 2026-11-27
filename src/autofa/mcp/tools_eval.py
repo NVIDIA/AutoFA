@@ -325,9 +325,11 @@ def _smoke_test_feature(  # noqa: C901
             except DetectorAbstained as exc:
                 result = {"item_id": item_id, "status": "abstained", "reason": str(exc)}
             except Exception as exc:  # noqa: BLE001
+                from autofa.session.detector_service import raise_if_budget_exhausted
                 from autofa.session.recovery import RunInterruptedError
                 from autofa.util.transient import is_transient_error
 
+                raise_if_budget_exhausted(exc)
                 if not isinstance(exc, RegexTimeoutError) and is_transient_error(exc):
                     raise RunInterruptedError(
                         "Diagnostic model connection interrupted. Completed item results "
@@ -1240,6 +1242,9 @@ def _iter_scored_items(
                 cache.put(cache.key(fn.source, deps, item, bundle=bundle), pred, record)
             return fn, item, pred, record, None
         except Exception as exc:  # noqa: BLE001
+            from autofa.session.detector_service import raise_if_budget_exhausted
+
+            raise_if_budget_exhausted(exc)
             if not isinstance(exc, RegexTimeoutError) and is_transient_error(exc):
                 from autofa.session.status_log import emit_runtime_status
                 from autofa.util.model_errors import model_error_diagnostic
@@ -1984,6 +1989,8 @@ def _evaluate_streaming(  # noqa: C901
         scores["eval_mode"] = ("round_validation" if round_fraction is not None
                                else "capped" if llm_capped and fn.name in llm_names
                                else "full" if max_items is None else "capped")
+        if scores["eval_mode"] == "capped":
+            scores["eval_limit"] = panel_frame_limit if fn.name in llm_names else max_items
         fn_scope_complete = scope_complete and not (
             llm_capped and fn.name in llm_names and panel_frame_limit < n_seen)
         scores["evaluation_scope_complete"] = bool(fn_scope_complete)
@@ -3357,6 +3364,9 @@ def _judge_function(  # noqa: C901
     evidence_items = [p[0] for p in sample]
     assigned_labels = [p[1] for p in sample]
     if retry_ids:
+        if not evidence_items:
+            return err("No requested processing-error cases are available and still match; "
+                       "restore their original evidence or defer the retry.")
         # Full-review membership serializes bucket labels as strings, while a
         # detector rerun can return bools. Recover the exact original label so
         # completed primary stages keep their content-addressed checkpoints.
@@ -3370,15 +3380,19 @@ def _judge_function(  # noqa: C901
     evidence_localisations = [fn.failure_localisations.get(str(it.get("_item_id") or ""))
                               for it in evidence_items]
     if record_repair_outcome and repair_context.get("plan_id"):
+        review_item_ids = [str(it.get("_item_id") or "") for it in evidence_items]
         try:
             with cancellation_guard():
                 repair_workflow.reserve_validation(
-                    rt.run.run_dir(), name,
-                    [str(it.get("_item_id") or "") for it in evidence_items],
+                    rt.run.run_dir(), name, review_item_ids,
                     expected_plan_id=repair_context["plan_id"],
                     resume_existing=reserved_ids is not None,
                     sample=sample_info,
                 )
+                if retry_ids:
+                    # The reservation can contain a subset of the planned errors.
+                    # Merge exactly that subset and retain every other original row.
+                    retry_ids = set(review_item_ids)
         except (ValueError, OSError) as exc:
             return err(f"Repair evidence could not be reserved: {exc}")
 

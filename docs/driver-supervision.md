@@ -220,6 +220,16 @@ uv run autofa supervise finalize --run RUN_ID
 ```
 
 Wait for the active discovery process to release its lock before invoking `finalize`.
+For a library with semantic detectors, a fresh finalizer repeats the readiness probe
+when discovery recorded a working classifier using the auto, Responses, or Decisions
+API and the configured endpoint still matches. It checks label and text capabilities
+before comparing saved scores so the two processes can verify the same evaluation
+settings. Refreshing a capped evaluation retains its original row limit, including
+completed older checkpoints whose limit can be recovered from their saved scope.
+An intermediate checkpoint keeps a completed full-review receipt when the current
+match population, reviewer settings, cohort, evidence, localisations and cited
+verdicts verify the original full-review operation. A changed assessment goes
+through ordinary full validation.
 Finalization reuses the native full-scoring/review checkpoints and preserves discovery
 rounds. It records selected/skipped detectors, unresolved evidence and retained-result
 completion separately. It does not publish automatically. A numerical target can remain

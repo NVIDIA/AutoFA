@@ -174,6 +174,29 @@ def _routing_message(readiness: dict[str, Any]) -> str:
     return ""
 
 
+def recheck_saved_routing(rt: Any, *, console: Console) -> None:
+    """Repeat discovery's endpoint probe before a fresh finalizer compares score contexts."""
+    from autofa.mcp.tools_eval import is_llm_detector
+    from autofa.session.recovery import read_json
+
+    if getattr(rt, "llm_readiness", None) is not None:
+        return
+    saved = read_json(rt.run.run_dir() / "llm_readiness.json")
+    if saved.get("available") is not True or saved.get("api") not in {
+        "auto", "responses", "decisions",
+    }:
+        return
+    endpoint = endpoint_for_config(rt.config)
+    if (saved.get("base_url"), saved.get("model"), saved["api"]) != (
+        endpoint.base_url, endpoint.model, endpoint.api
+    ):
+        return
+    if any(is_llm_detector(fn) for fn in rt.library.functions):
+        # Capability observations belong to this client. Reproduce them with the
+        # configured endpoint instead of copying a prior process's route flags.
+        rt.llm_readiness = check_llm_readiness(rt, console=console)
+
+
 def check_and_recover_readiness(rt: Any, *, console: Console,
                                probe: Any = None) -> dict[str, Any]:
     """Verify required capabilities, then use only the saved availability-recovery ladder."""

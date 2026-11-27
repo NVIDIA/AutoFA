@@ -39,6 +39,7 @@ from support.repair_review import (
     _finish_family_comparisons,
     plan,
     submit,
+    unreviewed_runtime,
     workflow,
 )
 from support.repair_review import repair_runtime as repair_runtime
@@ -173,6 +174,50 @@ def test_processing_retry_only_retries_failed_items_and_preserves_semantic_revie
         if row["item_id"] != "case-2":
             assert retained[row["item_id"]] == row
     assert workflow(rt)["latest"]["outcome"]["original_claim_validated"] is False
+
+
+@pytest.mark.parametrize("reservation", ["fresh", "resumed", "empty"])
+def test_processing_retry_preserves_errors_outside_its_reservation(
+    tmp_path, monkeypatch, stub_claim_compiler, reservation,
+):
+    fn = FeatureFunction(name="guess", source=SOURCE, description=DESCRIPTION, mechanism=MECHANISM)
+    rt, statuses, calls = unreviewed_runtime(tmp_path, monkeypatch, fn)
+    rt.dataset.items = rt.dataset.items[:4]
+    statuses.update({"case-0": "contradicted", "case-1": "error", "case-2": "error"})
+    assert tools_eval.evaluate_functions(names=["guess"], mode="full")["ok"]
+    baseline = tools_eval.judge_function("guess", evidence_n=4)
+    assert baseline["n_errors"] == 2
+    before = {row["item_id"]: deepcopy(row) for row in fn.scores["behavior_verdicts"]}
+    findings = tools_repair.get_function_repair("guess")["feedback"]["findings"]
+    planned = tools_repair.plan_function_repair(
+        name="guess", action="retry_review", rationale="Recover the two processing failures.",
+        finding_ids=[row["id"] for row in findings if row["status"] == "processing_error"],
+        evidence_ids=["case-1", "case-2"],
+    )
+    assert planned["ok"], planned
+    if reservation == "resumed":
+        repair_workflow.reserve_validation(
+            rt.run.run_dir(), "guess", ["case-1"], expected_plan_id=planned["plan"]["plan_id"],
+            sample=fn.scores["behavior_sample"],
+        )
+    else:
+        missing = {"case-2"} if reservation == "fresh" else {"case-1", "case-2"}
+        rt.dataset.items = [item for item in rt.dataset.items if item["_item_id"] not in missing]
+    calls.clear()
+    statuses["case-1"] = "supported"
+    result = tools_eval.judge_function("guess")
+    if reservation == "empty":
+        assert not result["ok"] and not calls
+        assert workflow(rt)["latest"]["reservation"] is None
+        assert {row["item_id"]: row for row in fn.scores["behavior_verdicts"]} == before
+        return
+    assert result["ok"], result
+    assert set(calls) == {"case-1"} and result["n_errors"] == 1
+    after = {row["item_id"]: row for row in fn.scores["behavior_verdicts"]}
+    assert after.keys() == before.keys()
+    assert after["case-1"]["verdict"] == "yes"
+    assert all(after[key] == before[key] for key in before if key != "case-1")
+    assert not workflow(rt)["latest"]["outcome"]["all_reviewed_confirmed"]
 
 
 def test_processing_retry_remains_available_after_repair_budget_exhaustion(repair_runtime):
