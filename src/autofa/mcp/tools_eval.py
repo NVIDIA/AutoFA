@@ -3357,6 +3357,9 @@ def _judge_function(  # noqa: C901
     evidence_items = [p[0] for p in sample]
     assigned_labels = [p[1] for p in sample]
     if retry_ids:
+        if not evidence_items:
+            return err("No requested processing-error cases are available and still match; "
+                       "restore their original evidence or defer the retry.")
         # Full-review membership serializes bucket labels as strings, while a
         # detector rerun can return bools. Recover the exact original label so
         # completed primary stages keep their content-addressed checkpoints.
@@ -3370,15 +3373,19 @@ def _judge_function(  # noqa: C901
     evidence_localisations = [fn.failure_localisations.get(str(it.get("_item_id") or ""))
                               for it in evidence_items]
     if record_repair_outcome and repair_context.get("plan_id"):
+        review_item_ids = [str(it.get("_item_id") or "") for it in evidence_items]
         try:
             with cancellation_guard():
                 repair_workflow.reserve_validation(
-                    rt.run.run_dir(), name,
-                    [str(it.get("_item_id") or "") for it in evidence_items],
+                    rt.run.run_dir(), name, review_item_ids,
                     expected_plan_id=repair_context["plan_id"],
                     resume_existing=reserved_ids is not None,
                     sample=sample_info,
                 )
+                if retry_ids:
+                    # The reservation can contain a subset of the planned errors.
+                    # Merge exactly that subset and retain every other original row.
+                    retry_ids = set(review_item_ids)
         except (ValueError, OSError) as exc:
             return err(f"Repair evidence could not be reserved: {exc}")
 
